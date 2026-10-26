@@ -1,0 +1,10 @@
+/target/
+*.emx
+*.emy
+*.emy2
+*.epml
+*.icc
+*.icm
+*.cpb
+.DS_Store
+*~

@@ -1,0 +1,18 @@
+[package]
+name = "epmi"
+description = "CLI tool for managing custom media slots and .emx packages on Epson SureColor SC-P900 / SC-P700 printers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "epmi"
+path = "src/main.rs"
+
+[dependencies]
+epmi-core.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
