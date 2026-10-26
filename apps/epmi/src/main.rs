@@ -3,23 +3,26 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use epmi_core::{
-    BASE_MEDIA_SPECS, DEFAULT_PRINTER_HOST, PrinterMediaSlot, SnmpMediaClient,
-    cloud_download_emx, cloud_list_media, default_user_custom_media_json, find_base_media,
-    import_emx_package, parse_emx_file, platen_gap_label, sync_printer_slots_to_json,
-    try_regenerate_driver_ppds,
+    BASE_MEDIA_SPECS, CLOUD_PRINTER_MODELS, PrinterMediaSlot, SnmpMediaClient,
+    cloud_download_emx, cloud_list_media, default_user_custom_media_json,
+    discover_epson_printers, find_base_media, import_emx_package, parse_emx_file,
+    platen_gap_label, sync_printer_slots_to_json, try_regenerate_driver_ppds,
 };
 
 fn print_usage() {
     eprintln!(
         "\
-epmi 0.1.0 - Media Management CLI for Epson SureColor SC-P900 / SC-P700
+epmi 0.1.0 - Media Management CLI for Epson SureColor Printers
 
 USAGE:
   epmi <SUBCOMMAND> [OPTIONS]
 
 SUBCOMMANDS:
+  discover [--json]
+      Auto-discover Epson printers from CUPS queues and the local network via SNMPv1.
+
   list-slots [--host <IP>] [--all] [--json]
-      Query custom media slots 1..30 from the printer via SNMPv1.
+      Query custom media slots 1..30 from the printer via SNMPv1 (auto-discovers printer if --host omitted).
 
   sync [--host <IP>] [--json-path <PATH>] [--regenerate-ppd]
       Read active NVRAM slots 1..30 from the printer and write custom_media.json.
@@ -38,12 +41,35 @@ SUBCOMMANDS:
   clear-slot --slot <1..30> [--host <IP>] [--sync]
       Clear/reset printer NVRAM slot 1..30.
 
-  cloud-list [--printer scp9xx|scp7xx] [--country DE] [--region 8] [--locale de] [--emx-only] [--json]
+  cloud-models
+      List all 27 supported Epson SureColor printer models and their cloud series codes.
+
+  cloud-list [--printer <CODE|MODEL>] [--country DE] [--region 8] [--locale de] [--emx-only] [--json]
       Query downloadable media definitions from the LFP Cloud Content Server.
 
-  cloud-download <EMX_ID> [--out-dir <DIR>] [--import] [--slot <1..30>] [--host <IP>] [--write-printer]
+  cloud-download <EMX_ID> [--out-dir <DIR>] [--printer <CODE|MODEL>] [--import] [--slot <1..30>] [--host <IP>] [--write-printer]
       Download an .emx package by EMX ID (and optionally import it)."
     );
+}
+
+fn resolve_printer_host(explicit_host: Option<String>) -> Result<String, String> {
+    if let Some(h) = explicit_host
+        && !h.trim().is_empty()
+    {
+        return Ok(h);
+    }
+    let found = discover_epson_printers(&[]);
+    if let Some(first) = found.first() {
+        eprintln!(
+            "Auto-selected Epson printer: {} ({})",
+            first.model_name, first.host
+        );
+        return Ok(first.host.clone());
+    }
+    Err(
+        "No Epson printer found automatically via CUPS or SNMP. Please pass --host <IP>."
+            .to_string(),
+    )
 }
 
 fn print_slots_table(slots: &[PrinterMediaSlot], show_all: bool) {
@@ -56,8 +82,8 @@ fn print_slots_table(slots: &[PrinterMediaSlot], show_all: bool) {
         return;
     }
     println!(
-        "{:>4}  {:>5}  {:>12}  {:>6}  {:<24}  {:>7}  {:>3}  {:>6}  {:>7}  Media Name (Printer LCD)",
-        "Slot", "UI ID", "32-bit MA_ID", "BaseSN", "Platen Gap", "Thick", "Dry", "CutOff", "RollOff"
+        "{:>4}  {:>5}  {:>12}  {:>6}  {:<24}  {:>7}  {:>3}  {:>6}  {:>7}  Media Name (Printer Display)",
+        "Slot", "UI ID", "Media ID", "BaseSN", "Platen Gap", "Thick", "Dry", "CutOff", "RollOff"
     );
     println!("{}", "-".repeat(118));
     for s in rows {
@@ -66,7 +92,7 @@ fn print_slots_table(slots: &[PrinterMediaSlot], show_all: bool) {
         let name_str = if s.registered {
             s.media_name.as_str()
         } else {
-            "(Unregistered)"
+            "(Empty)"
         };
         println!(
             "{:>4}  {:>5}  {:>12}  {:>6}  {:<24}  {:>5.2}mm  {:>3}  {:+6}  {:+7}  {} [{} ({})]",
@@ -97,8 +123,50 @@ fn run(args: &[String]) -> Result<(), String> {
             print_usage();
             Ok(())
         }
+        "discover" => {
+            let as_json = args.iter().any(|a| a == "--json");
+            let found = discover_epson_printers(&[]);
+            if as_json {
+                let s = serde_json::to_string_pretty(&found).map_err(|e| e.to_string())?;
+                println!("{s}");
+                return Ok(());
+            }
+            if found.is_empty() {
+                println!("No Epson printers discovered in CUPS or on the local network.");
+                return Ok(());
+            }
+            println!(
+                "{:<16}  {:<28}  {:<10}  {:<10}  Source",
+                "Host / IP", "Epson Model", "Status", "Cloud Code"
+            );
+            println!("{}", "-".repeat(92));
+            for p in found {
+                let status = if p.online { "Online" } else { "CUPS only" };
+                let cloud = p.cloud_series_code.as_deref().unwrap_or("-");
+                println!(
+                    "{:<16}  {:<28}  {:<10}  {:<10}  {}",
+                    p.host,
+                    p.model_name,
+                    status,
+                    cloud,
+                    p.source.badge_de()
+                );
+            }
+            Ok(())
+        }
+        "cloud-models" => {
+            println!(
+                "{:<14}  {:<18}  Model Series",
+                "Series Code", "Category"
+            );
+            println!("{}", "-".repeat(78));
+            for m in CLOUD_PRINTER_MODELS {
+                println!("{:<14}  {:<18}  {}", m.code, m.category, m.label);
+            }
+            Ok(())
+        }
         "list-slots" => {
-            let mut host = DEFAULT_PRINTER_HOST.to_string();
+            let mut host: Option<String> = None;
             let mut show_all = false;
             let mut as_json = false;
             let mut i = 1;
@@ -106,7 +174,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 match args[i].as_str() {
                     "--host" => {
                         i += 1;
-                        host = args.get(i).cloned().ok_or("Missing value for --host")?;
+                        host = Some(args.get(i).cloned().ok_or("Missing value for --host")?);
                     }
                     "--all" => show_all = true,
                     "--json" => as_json = true,
@@ -114,7 +182,8 @@ fn run(args: &[String]) -> Result<(), String> {
                 }
                 i += 1;
             }
-            let client = SnmpMediaClient::new(host);
+            let target_host = resolve_printer_host(host)?;
+            let client = SnmpMediaClient::new(target_host);
             let slots = client
                 .read_all_slots(!show_all)
                 .map_err(|e| e.to_string())?;
@@ -131,7 +200,7 @@ fn run(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         "sync" => {
-            let mut host = DEFAULT_PRINTER_HOST.to_string();
+            let mut host: Option<String> = None;
             let mut json_path: Option<PathBuf> = None;
             let mut regen_ppd = false;
             let mut i = 1;
@@ -139,7 +208,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 match args[i].as_str() {
                     "--host" => {
                         i += 1;
-                        host = args.get(i).cloned().ok_or("Missing value for --host")?;
+                        host = Some(args.get(i).cloned().ok_or("Missing value for --host")?);
                     }
                     "--json-path" | "--custom-media-json" => {
                         i += 1;
@@ -151,7 +220,8 @@ fn run(args: &[String]) -> Result<(), String> {
                 }
                 i += 1;
             }
-            let client = SnmpMediaClient::new(host);
+            let target_host = resolve_printer_host(host)?;
+            let client = SnmpMediaClient::new(target_host);
             let (written_paths, entries) =
                 sync_printer_slots_to_json(&client, json_path.as_deref())
                     .map_err(|e| e.to_string())?;
@@ -164,7 +234,7 @@ fn run(args: &[String]) -> Result<(), String> {
             }
             for item in &entries {
                 println!(
-                    "  Slot {:2} | key={:<32} | MA_ID={:<10} | base={} (sn={}) | duty={:+}% | icc={}",
+                    "  Slot {:2} | key={:<32} | ID={:<10} | base={} (sn={}) | duty={:+}% | icc={}",
                     item.slot,
                     item.key,
                     item.user_media_id,
@@ -213,7 +283,7 @@ fn run(args: &[String]) -> Result<(), String> {
         "import-emx" => {
             let mut emx_file: Option<String> = None;
             let mut slot = 0u8;
-            let mut host = DEFAULT_PRINTER_HOST.to_string();
+            let mut host: Option<String> = None;
             let mut write_printer = false;
             let mut json_path: Option<PathBuf> = None;
             let mut regen_ppd = false;
@@ -231,7 +301,7 @@ fn run(args: &[String]) -> Result<(), String> {
                     }
                     "--host" => {
                         i += 1;
-                        host = args.get(i).cloned().ok_or("Missing value for --host")?;
+                        host = Some(args.get(i).cloned().ok_or("Missing value for --host")?);
                     }
                     "--write-printer" => write_printer = true,
                     "--json-path" | "--custom-media-json" => {
@@ -248,19 +318,23 @@ fn run(args: &[String]) -> Result<(), String> {
                 i += 1;
             }
             let file_path = emx_file.ok_or("Usage: epmi import-emx <FILE.emx> [OPTIONS]")?;
-            let client = SnmpMediaClient::new(host);
+            let client_opt = if write_printer {
+                let target_host = resolve_printer_host(host)?;
+                Some(SnmpMediaClient::new(target_host))
+            } else {
+                None
+            };
             let (_pkg, entry, saved_icc) = import_emx_package(
                 &file_path,
                 slot,
                 json_path.as_deref(),
-                if write_printer { Some(&client) } else { None },
+                client_opt.as_ref(),
             )
             .map_err(|e| e.to_string())?;
 
-            let target_display = json_path
-                .unwrap_or_else(default_user_custom_media_json);
+            let target_display = json_path.unwrap_or_else(default_user_custom_media_json);
             println!(
-                "Imported '{}' (MA_ID={}) into {}",
+                "Imported '{}' (ID={}) into {}",
                 entry.name,
                 entry.user_media_id,
                 target_display.display()
@@ -276,7 +350,7 @@ fn run(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         "write-slot" => {
-            let mut host = DEFAULT_PRINTER_HOST.to_string();
+            let mut host: Option<String> = None;
             let mut slot = 0u8;
             let mut name = String::new();
             let mut base_media = "VelvetFineArt".to_string();
@@ -295,7 +369,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 match args[i].as_str() {
                     "--host" => {
                         i += 1;
-                        host = args.get(i).cloned().ok_or("Missing --host")?;
+                        host = Some(args.get(i).cloned().ok_or("Missing --host")?);
                     }
                     "--slot" => {
                         i += 1;
@@ -406,10 +480,11 @@ fn run(args: &[String]) -> Result<(), String> {
                 margin_sets: 0,
             };
 
-            let client = SnmpMediaClient::new(host);
+            let target_host = resolve_printer_host(host)?;
+            let client = SnmpMediaClient::new(target_host);
             let verified = client.write_slot(&slot_obj).map_err(|e| e.to_string())?;
             println!(
-                "Wrote and verified Slot {}: '{}' (MA_ID={}, BaseSN={}, Gap={}, Thickness={:.2}mm)",
+                "Wrote and verified Slot {}: '{}' (ID={}, BaseSN={}, Gap={}, Thickness={:.2}mm)",
                 verified.slot,
                 verified.media_name,
                 verified.user_media_id,
@@ -426,7 +501,7 @@ fn run(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         "clear-slot" => {
-            let mut host = DEFAULT_PRINTER_HOST.to_string();
+            let mut host: Option<String> = None;
             let mut slot = 0u8;
             let mut do_sync = false;
             let mut regen_ppd = false;
@@ -435,7 +510,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 match args[i].as_str() {
                     "--host" => {
                         i += 1;
-                        host = args.get(i).cloned().ok_or("Missing --host")?;
+                        host = Some(args.get(i).cloned().ok_or("Missing --host")?);
                     }
                     "--slot" => {
                         i += 1;
@@ -454,7 +529,8 @@ fn run(args: &[String]) -> Result<(), String> {
             if !(1..=30).contains(&slot) {
                 return Err("Usage: epmi clear-slot --slot <1..30> [--host <IP>]".to_string());
             }
-            let client = SnmpMediaClient::new(host);
+            let target_host = resolve_printer_host(host)?;
+            let client = SnmpMediaClient::new(target_host);
             let verified = client.clear_slot(slot).map_err(|e| e.to_string())?;
             println!(
                 "Cleared Slot {} (registered={})",
@@ -469,7 +545,7 @@ fn run(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         "cloud-list" => {
-            let mut printer = "scp9xx".to_string();
+            let mut printer: Option<String> = None;
             let mut country = "DE".to_string();
             let mut region = 8u32;
             let mut locale = "de".to_string();
@@ -480,7 +556,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 match args[i].as_str() {
                     "--printer" => {
                         i += 1;
-                        printer = args.get(i).cloned().ok_or("Missing --printer")?;
+                        printer = Some(args.get(i).cloned().ok_or("Missing --printer")?);
                     }
                     "--country" => {
                         i += 1;
@@ -504,7 +580,14 @@ fn run(args: &[String]) -> Result<(), String> {
                 }
                 i += 1;
             }
-            let records = cloud_list_media(&printer, &country, region, &locale)
+            let printer_code = match printer {
+                Some(p) => p,
+                None => discover_epson_printers(&[])
+                    .into_iter()
+                    .find_map(|p| p.cloud_series_code)
+                    .unwrap_or_else(|| "scp9xx".to_string()),
+            };
+            let records = cloud_list_media(&printer_code, &country, region, &locale)
                 .map_err(|e| e.to_string())?;
             if as_json {
                 let s = serde_json::to_string_pretty(&records).map_err(|e| e.to_string())?;
@@ -512,7 +595,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 return Ok(());
             }
             println!(
-                "{:<11}  {:<11}  {:<15}  {:<11}  {:<32}  EMX File",
+                "{:<11}  {:<13}  {:<15}  {:<11}  {:<32}  EMX File",
                 "EMX ID", "Manufacturer", "Category", "Kind", "Paper Name"
             );
             println!("{}", "-".repeat(118));
@@ -533,7 +616,7 @@ fn run(args: &[String]) -> Result<(), String> {
                     "Built-in"
                 };
                 println!(
-                    "{:<11}  {:<11}  {:<15}  {:<11}  {:<32}  {}",
+                    "{:<11}  {:<13}  {:<15}  {:<11}  {:<32}  {}",
                     emx_str,
                     r.media_manufacturer_name,
                     r.media_group_name,
@@ -553,7 +636,7 @@ fn run(args: &[String]) -> Result<(), String> {
             let mut locale = "de".to_string();
             let mut do_import = false;
             let mut slot = 0u8;
-            let mut host = DEFAULT_PRINTER_HOST.to_string();
+            let mut host: Option<String> = None;
             let mut write_printer = false;
 
             let mut i = 1;
@@ -595,7 +678,7 @@ fn run(args: &[String]) -> Result<(), String> {
                     }
                     "--host" => {
                         i += 1;
-                        host = args.get(i).cloned().ok_or("Missing --host")?;
+                        host = Some(args.get(i).cloned().ok_or("Missing --host")?);
                     }
                     "--write-printer" => write_printer = true,
                     other if !other.starts_with('-') && emx_id.is_none() => {
@@ -615,16 +698,21 @@ fn run(args: &[String]) -> Result<(), String> {
             let path = cloud_download_emx(rec, &out_dir).map_err(|e| e.to_string())?;
             println!("Downloaded {}", path.display());
             if do_import {
-                let client = SnmpMediaClient::new(host);
+                let client_opt = if write_printer {
+                    let target_host = resolve_printer_host(host)?;
+                    Some(SnmpMediaClient::new(target_host))
+                } else {
+                    None
+                };
                 let (_pkg, entry, _) = import_emx_package(
                     &path,
                     slot,
                     None::<&Path>,
-                    if write_printer { Some(&client) } else { None },
+                    client_opt.as_ref(),
                 )
                 .map_err(|e| e.to_string())?;
                 println!(
-                    "Imported '{}' (MA_ID={})",
+                    "Imported '{}' (ID={})",
                     entry.name, entry.user_media_id
                 );
             }
