@@ -17,7 +17,7 @@ ep-media-installer/
     └── epmi-gui/    # Native egui/eframe desktop GUI (`epmi-gui`)
 ```
 
-### Integration with `epson-p900-escpr-cups` and `LumaPrint`
+### Integration with [`epson-p900-escpr-cups`](https://github.com/colorcube/epson-p900-escpr-cups) and [`LumaPrint`](https://github.com/colorcube/lumaprint)
 
 `epmi` communicates with the CUPS driver (`rastertop900escpr` / `generate_ppd.py`) and **LumaPrint** via a clean file interface:
 - **Custom Media Database:** `~/.config/epson-p900-escpr/custom_media.json` (and automatically mirrors to `../epson-p900-escpr-cups/custom_media.json` if present)

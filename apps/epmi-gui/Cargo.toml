@@ -4,6 +4,7 @@ description = "Native egui desktop application for managing custom media slots a
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 rust-version.workspace = true
 
 [[bin]]

@@ -4,6 +4,7 @@ description = "CLI tool for managing custom media slots and .emx packages on Eps
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 rust-version.workspace = true
 
 [[bin]]
