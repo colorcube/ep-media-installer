@@ -61,17 +61,17 @@ fn ber_read_tlv(buf: &[u8], pos: usize) -> Result<(u8, &[u8], usize)> {
         }
         let mut len_acc = 0usize;
         for _ in 0..nbytes {
-            let b = *buf
-                .get(cur)
-                .ok_or_else(|| EpmiError::SnmpProtocol("Truncated multi-byte BER length".to_string()))?;
+            let b = *buf.get(cur).ok_or_else(|| {
+                EpmiError::SnmpProtocol("Truncated multi-byte BER length".to_string())
+            })?;
             len_acc = (len_acc << 8) | usize::from(b);
             cur = cur.saturating_add(1);
         }
         len_acc
     };
-    let end = cur.checked_add(length).ok_or_else(|| {
-        EpmiError::SnmpProtocol("BER TLV length overflow".to_string())
-    })?;
+    let end = cur
+        .checked_add(length)
+        .ok_or_else(|| EpmiError::SnmpProtocol("BER TLV length overflow".to_string()))?;
     let val = buf
         .get(cur..end)
         .ok_or_else(|| EpmiError::SnmpProtocol("BER TLV value exceeds packet".to_string()))?;
@@ -148,23 +148,22 @@ pub fn parse_snmp_response(resp: &[u8]) -> Result<Vec<u8>> {
 }
 
 pub fn extract_ex_payload(reply: &[u8]) -> Result<(u8, u8, u8, Vec<u8>)> {
-    let idx = reply
-        .windows(3)
-        .position(|w| w == b"ex:")
-        .ok_or_else(|| EpmiError::SnmpProtocol("Missing 'ex:' marker in printer reply".to_string()))?;
+    let idx = reply.windows(3).position(|w| w == b"ex:").ok_or_else(|| {
+        EpmiError::SnmpProtocol("Missing 'ex:' marker in printer reply".to_string())
+    })?;
     let hdr_start = idx.saturating_add(3);
     let hdr_end = hdr_start.saturating_add(5);
-    let hdr = reply.get(hdr_start..hdr_end).ok_or_else(|| {
-        EpmiError::SnmpProtocol("Truncated 'ex:' 5-byte header".to_string())
-    })?;
+    let hdr = reply
+        .get(hdr_start..hdr_end)
+        .ok_or_else(|| EpmiError::SnmpProtocol("Truncated 'ex:' 5-byte header".to_string()))?;
     let res_code = hdr[0];
     let m2 = hdr[1];
     let m3 = hdr[2];
     let payload_len = usize::from(u16::from_le_bytes([hdr[3], hdr[4]]));
     let pay_end = hdr_end.saturating_add(payload_len);
-    let payload = reply.get(hdr_end..pay_end).ok_or_else(|| {
-        EpmiError::SnmpProtocol("Truncated 'ex:' payload".to_string())
-    })?;
+    let payload = reply
+        .get(hdr_end..pay_end)
+        .ok_or_else(|| EpmiError::SnmpProtocol("Truncated 'ex:' payload".to_string()))?;
     Ok((res_code, m2, m3, payload.to_vec()))
 }
 
@@ -314,7 +313,9 @@ impl SnmpMediaClient {
 
     /// Read the compact 30-slot directory in a single SNMP query.
     pub fn read_slot_directory(&self) -> Result<Vec<SlotSummaryEntry>> {
-        let cmd: [u8; 12] = [0x65, 0x78, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1B, 0x00, 0x00, 0xC0];
+        let cmd: [u8; 12] = [
+            0x65, 0x78, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1B, 0x00, 0x00, 0xC0,
+        ];
         let reply = self.send_ex_command(&cmd, 1)?;
         let (res_code, _m2, _m3, payload) = extract_ex_payload(&reply)?;
         if res_code != 0 {
@@ -346,7 +347,9 @@ impl SnmpMediaClient {
         if !(1..=30).contains(&slot) {
             return Err(EpmiError::InvalidSlot(slot));
         }
-        let cmd: [u8; 12] = [0x65, 0x78, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1B, 0x00, slot, 0x00];
+        let cmd: [u8; 12] = [
+            0x65, 0x78, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1B, 0x00, slot, 0x00,
+        ];
         let reply = self.send_ex_command(&cmd, slot)?;
         let (res_code, _m2, _m3, payload) = extract_ex_payload(&reply)?;
         if res_code != 0 {
@@ -474,7 +477,13 @@ mod tests {
             assert_eq!(decoded.base_sn_id, 174);
             assert_eq!(decoded.platen_gap, 15);
             assert_eq!(decoded.thickness_01mm, 30);
-            assert_eq!(pkt2, vec![0x65, 0x78, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1b, 0x00, 0x05, 0x80, 0x2b, 0x02, 0x00, 0x00]);
+            assert_eq!(
+                pkt2,
+                vec![
+                    0x65, 0x78, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1b, 0x00, 0x05, 0x80, 0x2b,
+                    0x02, 0x00, 0x00
+                ]
+            );
         }
     }
 }

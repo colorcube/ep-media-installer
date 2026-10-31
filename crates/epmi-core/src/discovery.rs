@@ -123,7 +123,7 @@ pub fn parse_ieee1284_model(raw: &[u8]) -> Option<String> {
     for part in text.split(';') {
         let trimmed = part.trim();
         for prefix in ["MDL:", "MODEL:"] {
-            if let Some( rest ) = trimmed.strip_prefix(prefix) {
+            if let Some(rest) = trimmed.strip_prefix(prefix) {
                 let clean = rest.trim();
                 if !clean.is_empty() {
                     return if clean.to_ascii_uppercase().starts_with("EPSON") {
@@ -163,7 +163,10 @@ pub fn probe_epson_printer_snmp(host: &str, timeout: Duration) -> Option<String>
     if let Ok((n, _)) = sock.recv_from(&mut buf)
         && let Ok(val) = parse_snmp_response(&buf[..n])
     {
-        let descr = String::from_utf8_lossy(&val).trim().trim_end_matches('\0').to_string();
+        let descr = String::from_utf8_lossy(&val)
+            .trim()
+            .trim_end_matches('\0')
+            .to_string();
         if is_epson_printer_identifier(&descr) {
             return Some(descr);
         }
@@ -186,7 +189,10 @@ pub fn probe_epson_printer_snmp(host: &str, timeout: Duration) -> Option<String>
     if let Ok((n, _)) = sock.recv_from(&mut buf)
         && let Ok(val) = parse_snmp_response(&buf[..n])
     {
-        let descr = String::from_utf8_lossy(&val).trim().trim_end_matches('\0').to_string();
+        let descr = String::from_utf8_lossy(&val)
+            .trim()
+            .trim_end_matches('\0')
+            .to_string();
         if is_epson_printer_identifier(&descr) {
             return Some(descr);
         }
@@ -460,7 +466,8 @@ mod tests {
 
     #[test]
     fn test_parse_ieee1284_model() {
-        let sample = b"\x00@BDC PS\r\ndi:MFG:EPSON;CMD:ESCPL2,BDC,D4,D4PX;MDL:SC-P900 Series;CLS:PRINTER;";
+        let sample =
+            b"\x00@BDC PS\r\ndi:MFG:EPSON;CMD:ESCPL2,BDC,D4,D4PX;MDL:SC-P900 Series;CLS:PRINTER;";
         assert_eq!(
             parse_ieee1284_model(sample).as_deref(),
             Some("EPSON SC-P900 Series")

@@ -90,9 +90,11 @@ impl ThemeKind {
             | Self::AdwaitaDark
             | Self::SolarizedDark
             | Self::Classic => true,
-            Self::BreezeLight | Self::ProLightGray | Self::ProLight | Self::StudioLight | Self::Adwaita => {
-                false
-            }
+            Self::BreezeLight
+            | Self::ProLightGray
+            | Self::ProLight
+            | Self::StudioLight
+            | Self::Adwaita => false,
         }
     }
 

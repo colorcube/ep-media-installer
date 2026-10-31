@@ -72,8 +72,7 @@ impl EmxPackage {
     }
 
     pub fn to_custom_media_entry(&self, slot: u8) -> CustomMediaEntry {
-        let base_spec =
-            find_base_media_by_sn_id(self.base_sn_id).unwrap_or(&BASE_MEDIA_SPECS[5]);
+        let base_spec = find_base_media_by_sn_id(self.base_sn_id).unwrap_or(&BASE_MEDIA_SPECS[5]);
         let key = sanitize_ppd_media_key(slot, &self.media_name);
         let disp_name = if (1..=30).contains(&slot) {
             format!("{} (Slot {})", self.media_name, slot)
@@ -114,9 +113,11 @@ impl EmxPackage {
 
 /// Extract all files from a standard ZIP buffer using the End-of-Central-Directory (EOCD)
 /// and Central Directory headers so even streaming/data-descriptor ZIP entries work reliably.
-fn extract_zip_entries(zip_bytes: &[u8]) -> Result<HashMap<String, Vec<u8>>> {
+pub(crate) fn extract_zip_entries(zip_bytes: &[u8]) -> Result<HashMap<String, Vec<u8>>> {
     if zip_bytes.len() < 22 {
-        return Err(EpmiError::InvalidEmx("Archive smaller than 22 bytes".to_string()));
+        return Err(EpmiError::InvalidEmx(
+            "Archive smaller than 22 bytes".to_string(),
+        ));
     }
 
     // Locate EOCD signature 0x06054b50 ("PK\x05\x06") from the end
@@ -128,8 +129,8 @@ fn extract_zip_entries(zip_bytes: &[u8]) -> Result<HashMap<String, Vec<u8>>> {
             break;
         }
     }
-    let eocd = eocd_pos
-        .ok_or_else(|| EpmiError::InvalidEmx("Missing ZIP EOCD signature".to_string()))?;
+    let eocd =
+        eocd_pos.ok_or_else(|| EpmiError::InvalidEmx("Missing ZIP EOCD signature".to_string()))?;
 
     let total_entries = usize::from(u16::from_le_bytes([
         zip_bytes[eocd + 10],
@@ -156,29 +157,28 @@ fn extract_zip_entries(zip_bytes: &[u8]) -> Result<HashMap<String, Vec<u8>>> {
             ));
         }
         let method = u16::from_le_bytes([hdr[10], hdr[11]]);
-        let comp_size = usize::try_from(u32::from_le_bytes([
-            hdr[20], hdr[21], hdr[22], hdr[23],
-        ]))
-        .map_err(|_| EpmiError::InvalidEmx("ZIP compressed size overflow".to_string()))?;
-        let uncomp_size = usize::try_from(u32::from_le_bytes([
-            hdr[24], hdr[25], hdr[26], hdr[27],
-        ]))
-        .map_err(|_| EpmiError::InvalidEmx("ZIP uncompressed size overflow".to_string()))?;
+        let comp_size =
+            usize::try_from(u32::from_le_bytes([hdr[20], hdr[21], hdr[22], hdr[23]]))
+                .map_err(|_| EpmiError::InvalidEmx("ZIP compressed size overflow".to_string()))?;
+        let uncomp_size = usize::try_from(u32::from_le_bytes([hdr[24], hdr[25], hdr[26], hdr[27]]))
+            .map_err(|_| EpmiError::InvalidEmx("ZIP uncompressed size overflow".to_string()))?;
         let name_len = usize::from(u16::from_le_bytes([hdr[28], hdr[29]]));
         let extra_len = usize::from(u16::from_le_bytes([hdr[30], hdr[31]]));
         let comment_len = usize::from(u16::from_le_bytes([hdr[32], hdr[33]]));
-        let local_offset = usize::try_from(u32::from_le_bytes([
-            hdr[42], hdr[43], hdr[44], hdr[45],
-        ]))
-        .map_err(|_| EpmiError::InvalidEmx("ZIP local header offset overflow".to_string()))?;
+        let local_offset =
+            usize::try_from(u32::from_le_bytes([hdr[42], hdr[43], hdr[44], hdr[45]])).map_err(
+                |_| EpmiError::InvalidEmx("ZIP local header offset overflow".to_string()),
+            )?;
 
         let name_start = pos.saturating_add(46);
         let name_end = name_start.saturating_add(name_len);
-        let name_bytes = zip_bytes.get(name_start..name_end).ok_or_else(|| {
-            EpmiError::InvalidEmx("Truncated ZIP entry filename".to_string())
-        })?;
+        let name_bytes = zip_bytes
+            .get(name_start..name_end)
+            .ok_or_else(|| EpmiError::InvalidEmx("Truncated ZIP entry filename".to_string()))?;
         let name = String::from_utf8_lossy(name_bytes).to_string();
-        pos = name_end.saturating_add(extra_len).saturating_add(comment_len);
+        pos = name_end
+            .saturating_add(extra_len)
+            .saturating_add(comment_len);
 
         // Read local file header at local_offset ("PK\x03\x04")
         let lhdr = zip_bytes
@@ -196,9 +196,9 @@ fn extract_zip_entries(zip_bytes: &[u8]) -> Result<HashMap<String, Vec<u8>>> {
             .saturating_add(lname_len)
             .saturating_add(lextra_len);
         let data_end = data_start.saturating_add(comp_size);
-        let comp_slice = zip_bytes.get(data_start..data_end).ok_or_else(|| {
-            EpmiError::InvalidEmx("Truncated ZIP compressed payload".to_string())
-        })?;
+        let comp_slice = zip_bytes
+            .get(data_start..data_end)
+            .ok_or_else(|| EpmiError::InvalidEmx("Truncated ZIP compressed payload".to_string()))?;
 
         if uncomp_size > 64 * 1024 * 1024 {
             return Err(EpmiError::InvalidEmx(
@@ -244,7 +244,10 @@ fn parse_cpb_ini(cpb_text: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for raw_line in cpb_text.lines() {
         let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('[') || line.starts_with(';') || line.starts_with('#')
+        if line.is_empty()
+            || line.starts_with('[')
+            || line.starts_with(';')
+            || line.starts_with('#')
         {
             continue;
         }
@@ -272,21 +275,26 @@ pub fn parse_emx_bytes(source_label: &str, zip_bytes: &[u8]) -> Result<EmxPackag
         }
     }
 
-    let xml_key = xml_name.ok_or_else(|| EpmiError::InvalidEmx("Missing .xml in .emx".to_string()))?;
-    let cpb_key = cpb_name.ok_or_else(|| EpmiError::InvalidEmx("Missing .cpb in .emx".to_string()))?;
+    let xml_key =
+        xml_name.ok_or_else(|| EpmiError::InvalidEmx("Missing .xml in .emx".to_string()))?;
+    let cpb_key =
+        cpb_name.ok_or_else(|| EpmiError::InvalidEmx("Missing .cpb in .emx".to_string()))?;
 
     let xml_text = String::from_utf8_lossy(&files[&xml_key]).to_string();
     let cpb_text = String::from_utf8_lossy(&files[&cpb_key]).to_string();
     let cpb = parse_cpb_ini(&cpb_text);
 
-    let model_name = extract_xml_tag(&xml_text, "Name").unwrap_or_else(|| "SC-P900 Series".to_string());
+    let model_name =
+        extract_xml_tag(&xml_text, "Name").unwrap_or_else(|| "SC-P900 Series".to_string());
     let series_name = extract_xml_tag(&xml_text, "Series").unwrap_or_else(|| model_name.clone());
 
     let xml_media_id = extract_xml_tag(&xml_text, "ID")
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(0);
-    let xml_vendor = extract_xml_tag(&xml_text, "Manufacturer").unwrap_or_else(|| "EPSON".to_string());
-    let xml_media_name = extract_xml_tag(&xml_text, "MediaName").unwrap_or_else(|| "Custom_Media".to_string());
+    let xml_vendor =
+        extract_xml_tag(&xml_text, "Manufacturer").unwrap_or_else(|| "EPSON".to_string());
+    let xml_media_name =
+        extract_xml_tag(&xml_text, "MediaName").unwrap_or_else(|| "Custom_Media".to_string());
     let printer_media_id = extract_xml_tag(&xml_text, "PrinterMediaID")
         .and_then(|s| s.parse::<u8>().ok())
         .unwrap_or(25);
@@ -303,10 +311,7 @@ pub fn parse_emx_bytes(source_label: &str, zip_bytes: &[u8]) -> Result<EmxPackag
         .or_else(|| extract_xml_tag(&xml_text, "ICCProfileName"))
         .unwrap_or_default();
 
-    let media_name = cpb
-        .get("MediaName")
-        .cloned()
-        .unwrap_or(xml_media_name);
+    let media_name = cpb.get("MediaName").cloned().unwrap_or(xml_media_name);
     let media_full_name = cpb
         .get("MediaFullName")
         .cloned()

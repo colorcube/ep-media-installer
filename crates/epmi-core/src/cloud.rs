@@ -286,8 +286,16 @@ fn percent_encode(input: &str) -> String {
                 out.push('%');
                 let hi = (b >> 4) & 0x0F;
                 let lo = b & 0x0F;
-                out.push(char::from(if hi < 10 { b'0' + hi } else { b'A' + (hi - 10) }));
-                out.push(char::from(if lo < 10 { b'0' + lo } else { b'A' + (lo - 10) }));
+                out.push(char::from(if hi < 10 {
+                    b'0' + hi
+                } else {
+                    b'A' + (hi - 10)
+                }));
+                out.push(char::from(if lo < 10 {
+                    b'0' + lo
+                } else {
+                    b'A' + (lo - 10)
+                }));
             }
         }
     }

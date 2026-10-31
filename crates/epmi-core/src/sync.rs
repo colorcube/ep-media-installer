@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::emx::{EmxPackage, parse_emx_file};
 use crate::error::Result;
@@ -26,53 +25,28 @@ pub fn default_user_custom_media_json() -> PathBuf {
         .join("custom_media.json")
 }
 
-/// Discover additional sibling `custom_media.json` files (such as `../epson-p900-escpr-cups/custom_media.json`)
-/// so both the user config and a local driver checkout stay synchronized automatically.
+/// Files the working copy is written to (only the user's `custom_media.json`; the system database
+/// is written by the driver's privileged helper, see [`crate::system`]).
 pub fn discover_sync_targets(primary_path: Option<&Path>) -> Vec<PathBuf> {
-    let mut targets = Vec::new();
-    let primary = primary_path
-        .map(Path::to_path_buf)
-        .unwrap_or_else(default_user_custom_media_json);
-    targets.push(primary);
+    vec![
+        primary_path
+            .map(Path::to_path_buf)
+            .unwrap_or_else(default_user_custom_media_json),
+    ]
+}
 
-    let candidates = [
-        PathBuf::from("../epson-p900-escpr-cups/custom_media.json"),
-        PathBuf::from("./Code/epson-p900-escpr-cups/custom_media.json"),
-        home_dir()
-            .join(".config")
-            .join("epson-p900-escpr")
-            .join("custom_media.json"),
-    ];
-    for c in candidates {
-        if (c.is_file() || c.parent().is_some_and(Path::is_dir))
-            && !targets.iter().any(|t| t == &c)
-        {
-            targets.push(c);
-        }
-    }
-    targets
+/// User ICC store for profiles of custom media (`~/.local/share/color/icc/epson-scp900`).
+pub fn user_icc_dir() -> PathBuf {
+    home_dir()
+        .join(".local")
+        .join("share")
+        .join("color")
+        .join("icc")
+        .join("epson-scp900")
 }
 
 pub fn default_icc_output_dirs() -> Vec<PathBuf> {
-    let mut dirs = vec![
-        home_dir()
-            .join(".local")
-            .join("share")
-            .join("color")
-            .join("icc")
-            .join("epson-scp900"),
-        home_dir().join(".local").join("share").join("color").join("icc"),
-    ];
-    for sibling in [
-        PathBuf::from("../epson-p900-escpr-cups/icc"),
-        PathBuf::from("./Code/epson-p900-escpr-cups/icc"),
-        PathBuf::from("/usr/share/color/icc/epson-scp900"),
-    ] {
-        if sibling.is_dir() {
-            dirs.push(sibling);
-        }
-    }
-    dirs
+    vec![user_icc_dir()]
 }
 
 pub fn load_custom_media_json(path: &Path) -> Vec<CustomMediaEntry> {
@@ -162,9 +136,9 @@ pub fn sync_printer_slots_to_json(
 }
 
 /// Import an `.emx` file:
-/// 1. Extract its `.icc` profile into `~/.local/share/color/icc/epson-scp900/` (and driver `icc/` if present).
+/// 1. Extract its `.icc` profile into `~/.local/share/color/icc/epson-scp900/`.
 /// 2. Optionally write its mechanical parameters into `slot` (`1..=30`) on the printer.
-/// 3. Update `custom_media.json`.
+/// 3. Update the working copy `custom_media.json` (install system-wide with [`crate::system`]).
 pub fn import_emx_package(
     emx_path: impl AsRef<Path>,
     slot: u8,
@@ -222,21 +196,4 @@ pub fn import_emx_package(
     }
 
     Ok((pkg, entry, saved_icc_paths))
-}
-
-/// Optional helper to trigger `generate_ppd.py` if a sibling `epson-p900-escpr-cups` repo is present.
-pub fn try_regenerate_driver_ppds() -> Option<String> {
-    let candidates = [
-        PathBuf::from("../epson-p900-escpr-cups/scripts/generate_ppd.py"),
-        PathBuf::from("./Code/epson-p900-escpr-cups/scripts/generate_ppd.py"),
-    ];
-    for script in candidates {
-        if script.is_file()
-            && let Ok(out) = Command::new("python3").arg(&script).output()
-            && out.status.success()
-        {
-            return Some(String::from_utf8_lossy(&out.stdout).trim().to_string());
-        }
-    }
-    None
 }

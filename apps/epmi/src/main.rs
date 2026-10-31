@@ -3,10 +3,13 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use epmi_core::{
-    BASE_MEDIA_SPECS, CLOUD_PRINTER_MODELS, PrinterMediaSlot, SnmpMediaClient,
-    cloud_download_emx, cloud_list_media, default_user_custom_media_json,
-    discover_epson_printers, find_base_media, import_emx_package, parse_emx_file,
-    platen_gap_label, sync_printer_slots_to_json, try_regenerate_driver_ppds,
+    BASE_MEDIA_SPECS, CLOUD_PRINTER_MODELS, CustomMediaEntry, PrinterMediaSlot, ProfileSource,
+    SnmpMediaClient, assign_profile, cloud_download_emx, cloud_list_media,
+    default_user_custom_media_json, discover_epson_printers, entries_for_slots, export_media,
+    fetch_cloud_profiles, find_base_media, import_emx_package, import_media, install_system_media,
+    load_custom_media_json, load_system_media, match_printer_to_cloud_series, merge_imported,
+    parse_emx_file, platen_gap_label, probe_epson_printer_snmp, remove_system_media,
+    resolve_profile, save_custom_media_json, sync_printer_slots_to_json, system_state,
 };
 
 fn print_usage() {
@@ -24,14 +27,32 @@ SUBCOMMANDS:
   list-slots [--host <IP>] [--all] [--json]
       Query custom media slots 1..30 from the printer via SNMPv1 (auto-discovers printer if --host omitted).
 
-  sync [--host <IP>] [--json-path <PATH>] [--regenerate-ppd]
-      Read active NVRAM slots 1..30 from the printer and write custom_media.json.
+  sync [--host <IP>] [--json-path <PATH>]
+      Read active NVRAM slots 1..30 from the printer into the working copy
+      (~/.config/epson-p900-escpr/custom_media.json).
+
+  status [--host <IP>]
+      Show each paper: printer slot, installed on this computer?, colour profile.
+
+  install-system [--host <IP>] [--printer <CODE|MODEL>] [--icc <SLOT>=<FILE.icc>]... [--no-cloud]
+      „Für das System installieren“: read the printer slots, fetch profiles of Epson cloud media
+      automatically, assign own profiles, and install paper list + profiles for all users and the
+      CUPS driver (asks for the administrator password via pkexec).
+
+  remove-system <KEY>
+      Remove one paper from the system-wide installation.
+
+  export [--slot <1..30>]... -o <FILE.epmi>
+      Export papers with their profiles for another computer.
+
+  import <FILE.epmi>
+      Import exported papers into the working copy (then run install-system).
 
   inspect-emx <FILE.emx>
       Inspect XML, CPB, and ICC metadata inside an .emx archive.
 
-  import-emx <FILE.emx> [--slot <1..30>] [--host <IP>] [--write-printer] [--json-path <PATH>] [--regenerate-ppd]
-      Extract ICC profile, optionally write slot to printer NVRAM, and update custom_media.json.
+  import-emx <FILE.emx> [--slot <1..30>] [--host <IP>] [--write-printer] [--json-path <PATH>]
+      Extract ICC profile, optionally write slot to printer NVRAM, and update the working copy.
 
   write-slot --slot <1..30> --name <NAME> [--host <IP>] [--base-media <KEY|SN_ID>]
              [--media-id <U32>] [--platen-gap <U8>] [--thickness-mm <F64>]
@@ -73,10 +94,7 @@ fn resolve_printer_host(explicit_host: Option<String>) -> Result<String, String>
 }
 
 fn print_slots_table(slots: &[PrinterMediaSlot], show_all: bool) {
-    let rows: Vec<&PrinterMediaSlot> = slots
-        .iter()
-        .filter(|s| show_all || s.registered)
-        .collect();
+    let rows: Vec<&PrinterMediaSlot> = slots.iter().filter(|s| show_all || s.registered).collect();
     if rows.is_empty() {
         println!("No registered custom media slots found on printer.");
         return;
@@ -155,10 +173,7 @@ fn run(args: &[String]) -> Result<(), String> {
             Ok(())
         }
         "cloud-models" => {
-            println!(
-                "{:<14}  {:<18}  Model Series",
-                "Series Code", "Category"
-            );
+            println!("{:<14}  {:<18}  Model Series", "Series Code", "Category");
             println!("{}", "-".repeat(78));
             for m in CLOUD_PRINTER_MODELS {
                 println!("{:<14}  {:<18}  {}", m.code, m.category, m.label);
@@ -202,7 +217,6 @@ fn run(args: &[String]) -> Result<(), String> {
         "sync" => {
             let mut host: Option<String> = None;
             let mut json_path: Option<PathBuf> = None;
-            let mut regen_ppd = false;
             let mut i = 1;
             while i < args.len() {
                 match args[i].as_str() {
@@ -215,7 +229,8 @@ fn run(args: &[String]) -> Result<(), String> {
                         let p = args.get(i).ok_or("Missing value for --json-path")?;
                         json_path = Some(PathBuf::from(p));
                     }
-                    "--regenerate-ppd" => regen_ppd = true,
+                    // Deprecated: PPDs are refreshed by `install-system`.
+                    "--regenerate-ppd" => {}
                     other => return Err(format!("Unknown option: {other}")),
                 }
                 i += 1;
@@ -244,9 +259,7 @@ fn run(args: &[String]) -> Result<(), String> {
                     item.icc_profile
                 );
             }
-            if regen_ppd && let Some(msg) = try_regenerate_driver_ppds() {
-                println!("{msg}");
-            }
+            println!("Für Druckertreiber und LumaPrint: epmi install-system");
             Ok(())
         }
         "inspect-emx" => {
@@ -286,7 +299,6 @@ fn run(args: &[String]) -> Result<(), String> {
             let mut host: Option<String> = None;
             let mut write_printer = false;
             let mut json_path: Option<PathBuf> = None;
-            let mut regen_ppd = false;
 
             let mut i = 1;
             while i < args.len() {
@@ -309,7 +321,8 @@ fn run(args: &[String]) -> Result<(), String> {
                         let p = args.get(i).ok_or("Missing value for --json-path")?;
                         json_path = Some(PathBuf::from(p));
                     }
-                    "--regenerate-ppd" => regen_ppd = true,
+                    // Deprecated: PPDs are refreshed by `install-system`.
+                    "--regenerate-ppd" => {}
                     other if !other.starts_with('-') && emx_file.is_none() => {
                         emx_file = Some(other.to_string());
                     }
@@ -324,13 +337,9 @@ fn run(args: &[String]) -> Result<(), String> {
             } else {
                 None
             };
-            let (_pkg, entry, saved_icc) = import_emx_package(
-                &file_path,
-                slot,
-                json_path.as_deref(),
-                client_opt.as_ref(),
-            )
-            .map_err(|e| e.to_string())?;
+            let (_pkg, entry, saved_icc) =
+                import_emx_package(&file_path, slot, json_path.as_deref(), client_opt.as_ref())
+                    .map_err(|e| e.to_string())?;
 
             let target_display = json_path.unwrap_or_else(default_user_custom_media_json);
             println!(
@@ -344,9 +353,7 @@ fn run(args: &[String]) -> Result<(), String> {
             }
             let s = serde_json::to_string_pretty(&entry).map_err(|e| e.to_string())?;
             println!("{s}");
-            if regen_ppd && let Some(msg) = try_regenerate_driver_ppds() {
-                println!("{msg}");
-            }
+            println!("Für Druckertreiber und LumaPrint: epmi install-system");
             Ok(())
         }
         "write-slot" => {
@@ -362,7 +369,6 @@ fn run(args: &[String]) -> Result<(), String> {
             let mut roll_offset = 0i16;
             let mut category: Option<u8> = None;
             let mut do_sync = false;
-            let mut regen_ppd = false;
 
             let mut i = 1;
             while i < args.len() {
@@ -447,13 +453,16 @@ fn run(args: &[String]) -> Result<(), String> {
                         );
                     }
                     "--sync" => do_sync = true,
-                    "--regenerate-ppd" => regen_ppd = true,
+                    // Deprecated: PPDs are refreshed by `install-system`.
+                    "--regenerate-ppd" => {}
                     other => return Err(format!("Unknown option: {other}")),
                 }
                 i += 1;
             }
             if !(1..=30).contains(&slot) || name.is_empty() {
-                return Err("Usage: epmi write-slot --slot <1..30> --name <NAME> [OPTIONS]".to_string());
+                return Err(
+                    "Usage: epmi write-slot --slot <1..30> --name <NAME> [OPTIONS]".to_string(),
+                );
             }
 
             let base_spec = find_base_media(&base_media).unwrap_or(&BASE_MEDIA_SPECS[5]);
@@ -495,16 +504,13 @@ fn run(args: &[String]) -> Result<(), String> {
             if do_sync {
                 let _ = sync_printer_slots_to_json(&client, None).map_err(|e| e.to_string())?;
             }
-            if regen_ppd && let Some(msg) = try_regenerate_driver_ppds() {
-                println!("{msg}");
-            }
+            println!("Für Druckertreiber und LumaPrint: epmi install-system");
             Ok(())
         }
         "clear-slot" => {
             let mut host: Option<String> = None;
             let mut slot = 0u8;
             let mut do_sync = false;
-            let mut regen_ppd = false;
             let mut i = 1;
             while i < args.len() {
                 match args[i].as_str() {
@@ -521,7 +527,8 @@ fn run(args: &[String]) -> Result<(), String> {
                             .map_err(|_| "Invalid --slot")?;
                     }
                     "--sync" => do_sync = true,
-                    "--regenerate-ppd" => regen_ppd = true,
+                    // Deprecated: PPDs are refreshed by `install-system`.
+                    "--regenerate-ppd" => {}
                     other => return Err(format!("Unknown option: {other}")),
                 }
                 i += 1;
@@ -532,16 +539,11 @@ fn run(args: &[String]) -> Result<(), String> {
             let target_host = resolve_printer_host(host)?;
             let client = SnmpMediaClient::new(target_host);
             let verified = client.clear_slot(slot).map_err(|e| e.to_string())?;
-            println!(
-                "Cleared Slot {} (registered={})",
-                slot, verified.registered
-            );
+            println!("Cleared Slot {} (registered={})", slot, verified.registered);
             if do_sync {
                 let _ = sync_printer_slots_to_json(&client, None).map_err(|e| e.to_string())?;
             }
-            if regen_ppd && let Some(msg) = try_regenerate_driver_ppds() {
-                println!("{msg}");
-            }
+            println!("Für Druckertreiber und LumaPrint: epmi install-system");
             Ok(())
         }
         "cloud-list" => {
@@ -689,8 +691,8 @@ fn run(args: &[String]) -> Result<(), String> {
                 i += 1;
             }
             let target_id = emx_id.ok_or("Usage: epmi cloud-download <EMX_ID> [OPTIONS]")?;
-            let records = cloud_list_media(&printer, &country, region, &locale)
-                .map_err(|e| e.to_string())?;
+            let records =
+                cloud_list_media(&printer, &country, region, &locale).map_err(|e| e.to_string())?;
             let rec = records
                 .iter()
                 .find(|r| r.emx_id == target_id)
@@ -704,21 +706,205 @@ fn run(args: &[String]) -> Result<(), String> {
                 } else {
                     None
                 };
-                let (_pkg, entry, _) = import_emx_package(
-                    &path,
-                    slot,
-                    None::<&Path>,
-                    client_opt.as_ref(),
-                )
-                .map_err(|e| e.to_string())?;
-                println!(
-                    "Imported '{}' (ID={})",
-                    entry.name, entry.user_media_id
-                );
+                let (_pkg, entry, _) =
+                    import_emx_package(&path, slot, None::<&Path>, client_opt.as_ref())
+                        .map_err(|e| e.to_string())?;
+                println!("Imported '{}' (ID={})", entry.name, entry.user_media_id);
             }
             Ok(())
         }
+        "status" => {
+            let host = parse_host_only(&args[1..])?;
+            let working = load_working_copy();
+            let entries = match read_registered_slots(host) {
+                Ok((slots, _model)) => entries_for_slots(&slots, &working),
+                Err(e) => {
+                    eprintln!("Drucker nicht erreichbar ({e}); zeige die Arbeitskopie.");
+                    working
+                }
+            };
+            print_status_table(&entries);
+            Ok(())
+        }
+        "install-system" => {
+            let mut host: Option<String> = None;
+            let mut printer: Option<String> = None;
+            let mut use_cloud = true;
+            let mut icc_assignments: Vec<(u8, PathBuf)> = Vec::new();
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--host" => {
+                        i += 1;
+                        host = Some(args.get(i).cloned().ok_or("Missing value for --host")?);
+                    }
+                    "--printer" => {
+                        i += 1;
+                        printer = Some(args.get(i).cloned().ok_or("Missing value for --printer")?);
+                    }
+                    "--icc" => {
+                        i += 1;
+                        let spec = args.get(i).ok_or("Missing value for --icc")?;
+                        let (slot, file) = spec
+                            .split_once('=')
+                            .ok_or("--icc expects <SLOT>=<FILE.icc>")?;
+                        let slot: u8 = slot.parse().map_err(|_| "Invalid slot in --icc")?;
+                        icc_assignments.push((slot, PathBuf::from(file)));
+                    }
+                    "--no-cloud" => use_cloud = false,
+                    other => return Err(format!("Unknown option: {other}")),
+                }
+                i += 1;
+            }
+            let working = load_working_copy();
+            let (slots, model) = read_registered_slots(host)?;
+            let mut entries = entries_for_slots(&slots, &working);
+            for (slot, file) in &icc_assignments {
+                let entry = entries
+                    .iter_mut()
+                    .find(|e| e.slot == *slot)
+                    .ok_or_else(|| format!("Speicherplatz {slot} ist im Drucker nicht belegt"))?;
+                assign_profile(entry, file).map_err(|e| e.to_string())?;
+            }
+            if use_cloud {
+                let series = printer.unwrap_or(model);
+                let code = match_printer_to_cloud_series(&series)
+                    .map(|m| m.code)
+                    .unwrap_or("scp9xx");
+                match cloud_list_media(code, "DE", 8, "de")
+                    .and_then(|list| fetch_cloud_profiles(&mut entries, &list))
+                {
+                    Ok(done) => {
+                        for name in done {
+                            println!("Farbprofil aus der Epson-Cloud übernommen: {name}");
+                        }
+                    }
+                    Err(e) => eprintln!("Epson-Cloud nicht erreichbar ({e}); weiter ohne."),
+                }
+            }
+            save_custom_media_json(&default_user_custom_media_json(), &entries)
+                .map_err(|e| e.to_string())?;
+            print_status_table(&entries);
+            let report = install_system_media(&entries).map_err(|e| e.to_string())?;
+            println!("{report}");
+            Ok(())
+        }
+        "remove-system" => {
+            let key = args.get(1).ok_or("Usage: epmi remove-system <KEY>")?;
+            let report = remove_system_media(key).map_err(|e| e.to_string())?;
+            println!("{report}");
+            Ok(())
+        }
+        "export" => {
+            let mut slots: Vec<u8> = Vec::new();
+            let mut out: Option<PathBuf> = None;
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--slot" => {
+                        i += 1;
+                        let v = args.get(i).ok_or("Missing value for --slot")?;
+                        slots.push(v.parse().map_err(|_| "Invalid slot")?);
+                    }
+                    "-o" | "--out" => {
+                        i += 1;
+                        out = Some(PathBuf::from(args.get(i).ok_or("Missing value for -o")?));
+                    }
+                    other => return Err(format!("Unknown option: {other}")),
+                }
+                i += 1;
+            }
+            let out = out.ok_or("Usage: epmi export [--slot <N>]... -o <FILE.epmi>")?;
+            let selected: Vec<CustomMediaEntry> = load_working_copy()
+                .into_iter()
+                .filter(|e| slots.is_empty() || slots.contains(&e.slot))
+                .collect();
+            if selected.is_empty() {
+                return Err(String::from("Keine passenden Papiere in der Arbeitskopie"));
+            }
+            export_media(&selected, &out).map_err(|e| e.to_string())?;
+            println!(
+                "{} Papier(e) exportiert nach {}",
+                selected.len(),
+                out.display()
+            );
+            Ok(())
+        }
+        "import" => {
+            let file = args.get(1).ok_or("Usage: epmi import <FILE.epmi>")?;
+            let imported = import_media(Path::new(file)).map_err(|e| e.to_string())?;
+            let count = imported.len();
+            let mut working = load_working_copy();
+            merge_imported(&mut working, imported);
+            save_custom_media_json(&default_user_custom_media_json(), &working)
+                .map_err(|e| e.to_string())?;
+            println!("{count} Papier(e) importiert. Jetzt: epmi install-system");
+            Ok(())
+        }
         other => Err(format!("Unknown subcommand '{other}'. Run 'epmi --help'.")),
+    }
+}
+
+/// Working copy, seeded from the system installation if the user has none yet.
+fn load_working_copy() -> Vec<CustomMediaEntry> {
+    let working = load_custom_media_json(&default_user_custom_media_json());
+    if working.is_empty() {
+        load_system_media()
+    } else {
+        working
+    }
+}
+
+fn parse_host_only(args: &[String]) -> Result<Option<String>, String> {
+    match args {
+        [] => Ok(None),
+        [flag, host] if flag == "--host" => Ok(Some(host.clone())),
+        _ => Err(String::from("Usage: --host <IP>")),
+    }
+}
+
+/// Registered printer slots and the printer model (for the cloud catalog).
+fn read_registered_slots(host: Option<String>) -> Result<(Vec<PrinterMediaSlot>, String), String> {
+    let explicit = host.is_some();
+    let target_host = resolve_printer_host(host)?;
+    let model = if explicit {
+        probe_epson_printer_snmp(&target_host, std::time::Duration::from_secs(2))
+            .unwrap_or_default()
+    } else {
+        discover_epson_printers(&[])
+            .into_iter()
+            .find(|p| p.host == target_host)
+            .map(|p| p.model_name)
+            .unwrap_or_default()
+    };
+    let slots = SnmpMediaClient::new(target_host)
+        .read_all_slots(true)
+        .map_err(|e| e.to_string())?;
+    Ok((slots, model))
+}
+
+fn print_status_table(entries: &[CustomMediaEntry]) {
+    let system = load_system_media();
+    println!(
+        "Platz  Papier                                     Dieser Rechner                  Farbprofil"
+    );
+    println!("{}", "-".repeat(118));
+    for e in entries {
+        let profile = match resolve_profile(e) {
+            ProfileSource::Own(p) => p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            ProfileSource::BaseOnly(n) => format!("nur Basisprofil ({n})"),
+            ProfileSource::Missing(n) => format!("FEHLT: {n}"),
+        };
+        println!(
+            "{:5}  {:<42} {:<31} {}",
+            e.slot,
+            e.media_name.chars().take(42).collect::<String>(),
+            system_state(e, &system).label_de(),
+            profile
+        );
     }
 }
 

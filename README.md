@@ -19,9 +19,28 @@ ep-media-installer/
 
 ### Integration with [`epson-p900-escpr-cups`](https://github.com/colorcube/epson-p900-escpr-cups) and [`LumaPrint`](https://github.com/colorcube/lumaprint)
 
-`epmi` communicates with the CUPS driver (`rastertop900escpr` / `generate_ppd.py`) and **LumaPrint** via a clean file interface:
-- **Custom Media Database:** `~/.config/epson-p900-escpr/custom_media.json` (and automatically mirrors to `../epson-p900-escpr-cups/custom_media.json` if present)
-- **Extracted ICC Profiles:** `~/.local/share/color/icc/epson-scp900/*.icc` (and `../epson-p900-escpr-cups/icc/*.icc`)
+Like Epson's own software on Windows/macOS, custom media live in two places: the **printer**
+stores the mechanical settings in its 30 NVRAM slots, every **computer** that prints needs the
+paper list and the ICC profiles locally. Epson's FAQ: the Media Installer must run on every
+computer.
+
+| What | Where | Written by |
+|---|---|---|
+| Mechanical settings, media ID | printer NVRAM slot `1..30` | `epmi` (SNMP) |
+| Working copy (per user) | `~/.config/epson-p900-escpr/custom_media.json`, profiles in `~/.local/share/color/icc/epson-scp900/` | `epmi` |
+| System paper list (CUPS filter, PPD, LumaPrint) | `/etc/epson-p900-escpr-cups/custom_media.json` | driver helper, via **„Für das System installieren“** |
+| System colour profiles | `/usr/local/share/color/icc/epson-p900-custom/` | driver helper |
+
+**„Für das System installieren“** (GUI button, CLI `epmi install-system`) reads the printer's slots,
+fetches the profiles of Epson cloud media automatically (the slot's media ID equals the cloud
+`.emx` ID), and hands the list to the privileged helper of the driver
+(`pkexec /usr/libexec/epson-p900-escpr-cups/epson-p900-media-install`, administrator password).
+The helper installs list and profiles and refreshes the PPDs of all CUPS queues of the driver.
+Requires [`epson-p900-escpr-cups`](https://github.com/colorcube/epson-p900-escpr-cups) to be installed.
+
+Papers that are not in the Epson cloud (e.g. third-party papers) get their profile assigned once
+(GUI: 📂 next to *Farbprofil*, CLI: `--icc <SLOT>=<FILE.icc>`). To set up a second computer,
+export them (`.epmi` archive with profiles) and import them there.
 
 ---
 
@@ -40,10 +59,19 @@ cargo run -p epmi -- discover
 cargo run -p epmi -- list-slots
 ```
 
-### 3. Synchronize printer NVRAM slots into `custom_media.json` (and regenerate CUPS PPDs)
+### 3. Install the printer's papers for this computer
 
 ```bash
-cargo run -p epmi -- sync --regenerate-ppd
+# State of each slot on this computer and its colour profile:
+cargo run -p epmi -- status
+
+# Install paper list + profiles for the CUPS driver and LumaPrint (asks for the admin password);
+# assign an own profile to slot 2 on the way:
+cargo run -p epmi -- install-system --icc 2=Hahnemuehle_PhotoRag308.icc
+
+# Move papers with their profiles to another computer:
+cargo run -p epmi -- export -o my-papers.epmi
+cargo run -p epmi -- import my-papers.epmi      # on the other computer, then install-system
 ```
 
 ### 4. Inspect or import a local `.emx` package
@@ -52,8 +80,9 @@ cargo run -p epmi -- sync --regenerate-ppd
 # Inspect XML, CPB, and ICC metadata inside an .emx archive:
 cargo run -p epmi -- inspect-emx Paper.emx
 
-# Import .emx package (extracts .icc, updates custom_media.json, and writes slot to printer):
-cargo run -p epmi -- import-emx Paper.emx --slot 6 --write-printer --regenerate-ppd
+# Import .emx package (extracts .icc, updates the working copy, and writes slot to printer):
+cargo run -p epmi -- import-emx Paper.emx --slot 6 --write-printer
+cargo run -p epmi -- install-system
 ```
 
 ### 5. Browse and download `.emx` media packages from the Cloud Catalog (27 SureColor series)
@@ -76,7 +105,7 @@ cargo run -p epmi-gui
 ```
 
 - **Automatic Epson Printer Discovery:** Finds Epson printers automatically via installed CUPS queues (`lpstat -v` / PPD) and local network SNMPv1 discovery (`hrDeviceDescr` / IEEE-1284 Device ID), strictly filtering out non-Epson devices. Automatically selects the matching model in the Cloud Catalog and reads all 30 memory slots on startup.
-- **1-Click Installation Workflow:** Choose a target slot (defaults to the next free slot, e.g. `Platz 06`) and click **`📲 Auf Platz XX installieren`** in the Cloud Catalog or Local `.emx` view to extract the `.icc` profile, write the paper into the printer's memory slot, and update `custom_media.json` + CUPS PPD in a single step.
+- **1-Click Installation Workflow:** Choose a target slot (defaults to the next free slot, e.g. `Platz 06`) and click **`📲 Auf Platz XX installieren`** in the Cloud Catalog or Local `.emx` view to extract the `.icc` profile, write the paper into the printer's memory slot, and update the working copy; then **`🖥 Für das System installieren`** makes it available to the CUPS driver and LumaPrint.
 - **All 27 SureColor Models in Cloud Catalog:** Supports the full SureColor SC-P (`SC-P700` to `SC-P20500`) and SC-T (`SC-T3700` to `SC-T7700`) product lines.
 - **LumaPrint / PhotoCraft Desktop UI:**
   - **KDE System Font & Point-Size Detection:** Reads `~/.config/kdeglobals` and loads the system font via `fc-match`.

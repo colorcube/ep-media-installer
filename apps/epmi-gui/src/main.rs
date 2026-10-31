@@ -16,14 +16,16 @@ use std::time::Duration;
 
 use egui::{Context, CornerRadius, Margin, RichText, Stroke, Ui, Vec2};
 use epmi_core::{
-    BASE_MEDIA_SPECS, CLOUD_PRINTER_MODELS, CloudMediaRecord, DiscoveredEpsonPrinter,
-    DiscoverySource, EmxPackage, PrinterMediaSlot, SnmpMediaClient, cloud_download_emx,
-    cloud_list_media, default_icc_output_dirs, default_user_custom_media_json,
-    discover_epson_printers, discover_sync_targets, find_base_media_by_sn_id,
-    import_emx_package, load_custom_media_json, match_printer_to_cloud_series,
-    media_category_label, merge_slots_with_existing, parse_emx_file, platen_gap_label,
-    probe_epson_printer_snmp, sanitize_ppd_media_key, save_custom_media_json,
-    try_regenerate_driver_ppds,
+    BASE_MEDIA_SPECS, CLOUD_PRINTER_MODELS, CloudMediaRecord, CustomMediaEntry,
+    DiscoveredEpsonPrinter, DiscoverySource, EmxPackage, PrinterMediaSlot, ProfileSource,
+    SnmpMediaClient, SystemState, assign_profile, cloud_download_emx, cloud_list_media,
+    default_icc_output_dirs, default_user_custom_media_json, discover_epson_printers,
+    discover_sync_targets, entries_for_slots, export_media, fetch_cloud_profiles,
+    find_base_media_by_sn_id, import_emx_package, import_media, install_system_media,
+    load_custom_media_json, load_system_media, match_printer_to_cloud_series, media_category_label,
+    merge_imported, merge_slots_with_existing, parse_emx_file, platen_gap_label,
+    probe_epson_printer_snmp, resolve_profile, sanitize_ppd_media_key, save_custom_media_json,
+    system_state,
 };
 use theme::{
     KdeTypography, ThemeKind, Tokens, apply_theme_and_typography, install_kde_system_fonts,
@@ -36,16 +38,17 @@ enum WorkspaceView {
     EmxPackages,
 }
 
-/// Open a native Linux/KDE file dialog (`kdialog` or `zenity`) to select a `.emx` file.
-fn open_native_emx_file_dialog() -> Option<String> {
+/// Native Linux/KDE file dialog (`kdialog`, fallback `zenity`) for opening or saving a file.
+/// `patterns` is a space-separated glob list such as `"*.icc *.icm"`.
+fn native_file_dialog(title: &str, label: &str, patterns: &str, save: bool) -> Option<String> {
+    let kde_filter = format!("{label} ({patterns})|Alle Dateien (*)");
+    let kde_mode = if save {
+        "--getsavefilename"
+    } else {
+        "--getopenfilename"
+    };
     if let Ok(out) = Command::new("kdialog")
-        .args([
-            "--title",
-            "Epson Medienpaket (.emx) auswählen",
-            "--getopenfilename",
-            ".",
-            "Epson Media Package (*.emx *.emy)|Alle Dateien (*)",
-        ])
+        .args(["--title", title, kde_mode, ".", kde_filter.as_str()])
         .output()
         && out.status.success()
     {
@@ -55,13 +58,16 @@ fn open_native_emx_file_dialog() -> Option<String> {
         }
     }
 
-    if let Ok(out) = Command::new("zenity")
-        .args([
-            "--file-selection",
-            "--title=Epson Medienpaket (.emx) auswählen",
-            "--file-filter=Epson Media (*.emx *.emy) | *.emx *.emy",
-        ])
-        .output()
+    let mut zenity_args = vec![
+        String::from("--file-selection"),
+        format!("--title={title}"),
+        format!("--file-filter={label} | {patterns}"),
+    ];
+    if save {
+        zenity_args.push(String::from("--save"));
+        zenity_args.push(String::from("--confirm-overwrite"));
+    }
+    if let Ok(out) = Command::new("zenity").args(&zenity_args).output()
         && out.status.success()
     {
         let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -71,6 +77,16 @@ fn open_native_emx_file_dialog() -> Option<String> {
     }
 
     None
+}
+
+/// Open a native file dialog to select a `.emx` file.
+fn open_native_emx_file_dialog() -> Option<String> {
+    native_file_dialog(
+        "Epson Medienpaket (.emx) auswählen",
+        "Epson Media Package",
+        "*.emx *.emy",
+        false,
+    )
 }
 
 pub struct EpmiGuiApp {
@@ -390,13 +406,9 @@ impl EpmiGuiApp {
                 written.push(t.display().to_string());
             }
         }
-        let ppd_msg = try_regenerate_driver_ppds()
-            .map(|_| " + CUPS-PPD aktualisiert")
-            .unwrap_or("");
-
         self.set_status(
             format!(
-                "{} Papiere mit Druckertreiber & LumaPrint synchronisiert ({}){ppd_msg}",
+                "{} Papiere in die Arbeitskopie übernommen ({}). Für Druckertreiber & LumaPrint: „Für das System installieren“.",
                 updated.len(),
                 written.join(", ")
             ),
@@ -430,9 +442,8 @@ impl EpmiGuiApp {
                 // Update custom_media.json with custom ICC & print_duty
                 let targets = discover_sync_targets(Some(&self.custom_media_json_path));
                 let existing = load_custom_media_json(&self.custom_media_json_path);
-                let mut entry = verified.to_custom_media_entry(
-                    existing.iter().find(|e| e.slot == self.selected_slot),
-                );
+                let mut entry = verified
+                    .to_custom_media_entry(existing.iter().find(|e| e.slot == self.selected_slot));
                 entry.print_duty = self.editor_print_duty;
                 if !self.editor_icc_profile.trim().is_empty() {
                     entry.icc_profile = self.editor_icc_profile.trim().to_string();
@@ -447,12 +458,11 @@ impl EpmiGuiApp {
                 for t in &targets {
                     let _ = save_custom_media_json(t, &merged);
                 }
-                let _ = try_regenerate_driver_ppds();
                 self.install_target_slot = self.next_free_slot();
 
                 self.set_status(
                     format!(
-                        "Speicherplatz {:02} ('{}') im Drucker gespeichert und für CUPS / LumaPrint aktiviert!",
+                        "Speicherplatz {:02} ('{}') im Drucker gespeichert. Für Druckertreiber & LumaPrint: „Für das System installieren“.",
                         self.selected_slot, verified.media_name
                     ),
                     false,
@@ -509,8 +519,7 @@ impl EpmiGuiApp {
         if !pkg.icc_profile_name.is_empty() && !pkg.icc_profile_bytes.is_empty() {
             for dir in default_icc_output_dirs() {
                 if std::fs::create_dir_all(&dir).is_ok() {
-                    let _ =
-                        std::fs::write(dir.join(&pkg.icc_profile_name), &pkg.icc_profile_bytes);
+                    let _ = std::fs::write(dir.join(&pkg.icc_profile_name), &pkg.icc_profile_bytes);
                 }
             }
         }
@@ -559,7 +568,6 @@ impl EpmiGuiApp {
                 self.editor_icc_profile = entry.icc_profile.clone();
                 self.loaded_emx = Some(pkg.clone());
                 self.install_target_slot = self.next_free_slot();
-                let _ = try_regenerate_driver_ppds();
 
                 let icc_note = if saved_iccs.is_empty() {
                     String::from("Standard-ICC")
@@ -573,7 +581,7 @@ impl EpmiGuiApp {
                 };
                 self.set_status(
                     format!(
-                        "✅ '{}' erfolgreich {printer_note} ({icc_note}, Treiber & LumaPrint aktualisiert)!",
+                        "✅ '{}' erfolgreich {printer_note} ({icc_note}). Für Druckertreiber & LumaPrint: „Für das System installieren“.",
                         pkg.media_name
                     ),
                     false,
@@ -582,6 +590,147 @@ impl EpmiGuiApp {
             Err(e) => {
                 self.set_status(format!("Installation fehlgeschlagen: {e}"), true);
             }
+        }
+    }
+
+    /// Working copy (`custom_media.json` of the user), seeded from the system installation.
+    fn working_copy(&self) -> Vec<CustomMediaEntry> {
+        let working = load_custom_media_json(&self.custom_media_json_path);
+        if working.is_empty() {
+            load_system_media()
+        } else {
+            working
+        }
+    }
+
+    /// „Für das System installieren“: registered printer slots + working copy settings, profiles of
+    /// Epson cloud media fetched automatically, installed for all users and the CUPS driver
+    /// (administrator password via pkexec).
+    fn install_for_system(&mut self) {
+        let mut entries = entries_for_slots(&self.slots, &self.working_copy());
+        if entries.is_empty() {
+            self.set_status(
+                "Keine belegten Speicherplätze – bitte zuerst den Drucker auslesen.",
+                true,
+            );
+            return;
+        }
+        let code = match_printer_to_cloud_series(&self.printer_model_name)
+            .map(|m| m.code.to_string())
+            .unwrap_or_else(|| self.cloud_model_code.clone());
+        let cloud_note = match cloud_list_media(&code, "DE", 8, "de")
+            .and_then(|list| fetch_cloud_profiles(&mut entries, &list))
+        {
+            Ok(done) if !done.is_empty() => {
+                format!(" Profile aus der Epson-Cloud: {}.", done.join(", "))
+            }
+            Ok(_) => String::new(),
+            Err(e) => format!(" (Epson-Cloud nicht erreichbar: {e})"),
+        };
+        let _ = save_custom_media_json(&self.custom_media_json_path, &entries);
+        match install_system_media(&entries) {
+            Ok(_) => self.set_status(
+                format!(
+                    "✅ {} Papier(e) für dieses System installiert – Druckertreiber und LumaPrint sind aktualisiert.{cloud_note}",
+                    entries.len()
+                ),
+                false,
+            ),
+            Err(e) => self.set_status(format!("Installation fehlgeschlagen: {e}{cloud_note}"), true),
+        }
+    }
+
+    /// Assigns an ICC profile file to the selected slot in the working copy.
+    fn choose_icc_for_selected_slot(&mut self) {
+        let Some(file) = native_file_dialog(
+            "Farbprofil (.icc) für das Papier auswählen",
+            "ICC-Profil",
+            "*.icc *.icm *.ICC *.ICM",
+            false,
+        ) else {
+            return;
+        };
+        let mut working = self.working_copy();
+        let slot = self.selected_slot;
+        let idx = if let Some(i) = working.iter().position(|e| e.slot == slot) {
+            i
+        } else {
+            let Some(s) = self
+                .slots
+                .get(usize::from(slot.saturating_sub(1)))
+                .filter(|s| s.registered)
+            else {
+                self.set_status(
+                    "Der Speicherplatz ist leer – bitte zuerst ein Papier speichern.",
+                    true,
+                );
+                return;
+            };
+            working.push(s.to_custom_media_entry(None));
+            working.len() - 1
+        };
+        let Some(entry) = working.get_mut(idx) else {
+            return;
+        };
+        match assign_profile(entry, std::path::Path::new(&file)) {
+            Ok(()) => {
+                self.editor_icc_profile = entry.icc_profile.clone();
+                let _ = save_custom_media_json(&self.custom_media_json_path, &working);
+                self.set_status(
+                    format!(
+                        "Farbprofil '{}' Platz {slot:02} zugewiesen. Jetzt „Für das System installieren“.",
+                        self.editor_icc_profile
+                    ),
+                    false,
+                );
+            }
+            Err(e) => self.set_status(format!("Farbprofil nicht übernommen: {e}"), true),
+        }
+    }
+
+    fn export_media_dialog(&mut self) {
+        let Some(file) =
+            native_file_dialog("Papiere exportieren", "epmi-Papierarchiv", "*.epmi", true)
+        else {
+            return;
+        };
+        let path = if file.ends_with(".epmi") {
+            file
+        } else {
+            format!("{file}.epmi")
+        };
+        let entries = entries_for_slots(&self.slots, &self.working_copy());
+        match export_media(&entries, std::path::Path::new(&path)) {
+            Ok(()) => self.set_status(
+                format!(
+                    "{} Papier(e) mit Farbprofilen exportiert: {path}",
+                    entries.len()
+                ),
+                false,
+            ),
+            Err(e) => self.set_status(format!("Export fehlgeschlagen: {e}"), true),
+        }
+    }
+
+    fn import_media_dialog(&mut self) {
+        let Some(file) =
+            native_file_dialog("Papiere importieren", "epmi-Papierarchiv", "*.epmi", false)
+        else {
+            return;
+        };
+        match import_media(std::path::Path::new(&file)) {
+            Ok(imported) => {
+                let count = imported.len();
+                let mut working = self.working_copy();
+                merge_imported(&mut working, imported);
+                let _ = save_custom_media_json(&self.custom_media_json_path, &working);
+                self.select_slot(self.selected_slot);
+                self.set_status(
+                    format!("{count} Papier(e) importiert. Jetzt „Für das System installieren“."),
+                    false,
+                );
+            }
+            Err(e) => self.set_status(format!("Import fehlgeschlagen: {e}"), true),
         }
     }
 
@@ -1125,7 +1274,11 @@ impl EpmiGuiApp {
                 let cur_base_lbl = cur_base.map_or_else(
                     || format!("Benutzerdefiniert ({})", self.editor_slot.base_sn_id),
                     |b| {
-                        let ink = if b.is_matte { "Matt · MK" } else { "Foto · PK" };
+                        let ink = if b.is_matte {
+                            "Matt · MK"
+                        } else {
+                            "Foto · PK"
+                        };
                         format!("{} ({})", b.name, ink)
                     },
                 );
@@ -1222,9 +1375,7 @@ impl EpmiGuiApp {
                 ui.end_row();
 
                 ui.label(RichText::new("Trocknungszeit:").color(t.text_dim));
-                ui.add(
-                    egui::Slider::new(&mut self.editor_slot.drying_time, 0..=100).suffix(" %"),
-                );
+                ui.add(egui::Slider::new(&mut self.editor_slot.drying_time, 0..=100).suffix(" %"));
                 ui.end_row();
 
                 ui.label(RichText::new("Vorschub (Blatt):").color(t.text_dim));
@@ -1262,17 +1413,25 @@ impl EpmiGuiApp {
             .min_col_width(135.0)
             .show(ui, |ui| {
                 ui.label(RichText::new("Farbprofil (.icc):").color(t.text_dim));
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.editor_icc_profile)
-                        .desired_width(230.0)
-                        .hint_text("z. B. SureColor_P900_FineArtBaryta_v1.icc"),
-                );
+                let mut choose = false;
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.editor_icc_profile)
+                            .desired_width(196.0)
+                            .hint_text("z. B. SureColor_P900_FineArtBaryta_v1.icc"),
+                    );
+                    choose = ui
+                        .button("📂")
+                        .on_hover_text("Farbprofil-Datei für dieses Papier auswählen")
+                        .clicked();
+                });
+                if choose {
+                    self.choose_icc_for_selected_slot();
+                }
                 ui.end_row();
 
                 ui.label(RichText::new("Tintenauftrag:").color(t.text_dim));
-                ui.add(
-                    egui::Slider::new(&mut self.editor_print_duty, -50..=50).suffix(" %"),
-                );
+                ui.add(egui::Slider::new(&mut self.editor_print_duty, -50..=50).suffix(" %"));
                 ui.end_row();
             });
     }
@@ -1386,7 +1545,9 @@ impl EpmiGuiApp {
 
     fn draw_slots_workspace(&mut self, ui: &mut Ui) {
         let t = self.tokens;
-        let existing_json = load_custom_media_json(&self.custom_media_json_path);
+        let existing_json = self.working_copy();
+        let system_media = load_system_media();
+        let mut action: Option<fn(&mut Self)> = None;
 
         ui.horizontal(|ui| {
             ui.heading(
@@ -1398,6 +1559,35 @@ impl EpmiGuiApp {
                 .color(t.text),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let install_btn = egui::Button::new(
+                    RichText::new("🖥 Für das System installieren")
+                        .strong()
+                        .color(t.accent_text),
+                )
+                .fill(t.accent);
+                if ui
+                    .add(install_btn)
+                    .on_hover_text(
+                        "Papierliste und Farbprofile für alle Benutzer, den CUPS-Druckertreiber und LumaPrint installieren (Administrator-Passwort). Profile von Epson-Cloud-Papieren werden automatisch geladen. Wie unter Windows/macOS nötig auf jedem Rechner, der druckt.",
+                    )
+                    .clicked()
+                {
+                    action = Some(Self::install_for_system);
+                }
+                if ui
+                    .button("📥 Importieren…")
+                    .on_hover_text("Papiere mit Farbprofilen von einem anderen Rechner übernehmen (.epmi)")
+                    .clicked()
+                {
+                    action = Some(Self::import_media_dialog);
+                }
+                if ui
+                    .button("📤 Exportieren…")
+                    .on_hover_text("Papiere mit Farbprofilen für einen anderen Rechner sichern (.epmi)")
+                    .clicked()
+                {
+                    action = Some(Self::export_media_dialog);
+                }
                 if ui
                     .button("☁ Neues Papier aus Cloud-Katalog hinzufügen…")
                     .clicked()
@@ -1429,7 +1619,7 @@ impl EpmiGuiApp {
                     .show(ui, |ui| {
                         egui::Grid::new("central_nvram_slots_grid")
                             .striped(true)
-                            .num_columns(7)
+                            .num_columns(8)
                             .spacing([18.0, 10.0])
                             .show(ui, |ui| {
                                 for hdr in [
@@ -1439,6 +1629,7 @@ impl EpmiGuiApp {
                                     "Schwarztinte",
                                     "Papierdicke",
                                     "Walzenabstand",
+                                    "Dieser Rechner",
                                     "Zugeordnetes Farbprofil (ICC)",
                                 ] {
                                     ui.label(RichText::new(hdr).strong().color(t.text_dim));
@@ -1486,9 +1677,11 @@ impl EpmiGuiApp {
                                     if ui
                                         .selectable_label(
                                             is_sel,
-                                            RichText::new(name_display)
-                                                .strong()
-                                                .color(if is_reg { t.text } else { t.text_faint }),
+                                            RichText::new(name_display).strong().color(if is_reg {
+                                                t.text
+                                            } else {
+                                                t.text_faint
+                                            }),
                                         )
                                         .clicked()
                                     {
@@ -1532,23 +1725,46 @@ impl EpmiGuiApp {
                                     };
                                     ui.label(RichText::new(gap_str).color(t.text_dim));
 
-                                    let icc_str = if is_reg {
-                                        existing_json
+                                    if is_reg {
+                                        let entry = existing_json
                                             .iter()
-                                            .find(|e| e.slot == slot.slot)
-                                            .map(|e| e.icc_profile.clone())
-                                            .unwrap_or_else(|| {
-                                                slot.base_media_spec().icc_profile.to_string()
+                                            .find(|e| {
+                                                e.slot == slot.slot
+                                                    && e.user_media_id == slot.user_media_id
                                             })
+                                            .cloned()
+                                            .unwrap_or_else(|| slot.to_custom_media_entry(None));
+                                        let state = system_state(&entry, &system_media);
+                                        let state_col = match state {
+                                            SystemState::Installed => t.success,
+                                            SystemState::Changed => t.warning,
+                                            SystemState::NotInstalled => t.danger,
+                                        };
+                                        ui.label(RichText::new(state.label_de()).color(state_col));
+                                        let (icc_str, icc_col) = match resolve_profile(&entry) {
+                                            ProfileSource::Own(p) => (
+                                                p.file_name()
+                                                    .map(|n| n.to_string_lossy().into_owned())
+                                                    .unwrap_or_default(),
+                                                t.text_dim,
+                                            ),
+                                            ProfileSource::BaseOnly(n) => {
+                                                (format!("nur Basisprofil ({n})"), t.warning)
+                                            }
+                                            ProfileSource::Missing(n) => {
+                                                (format!("fehlt: {n}"), t.danger)
+                                            }
+                                        };
+                                        ui.label(
+                                            RichText::new(icc_str)
+                                                .small()
+                                                .monospace()
+                                                .color(icc_col),
+                                        );
                                     } else {
-                                        String::from("—")
-                                    };
-                                    ui.label(
-                                        RichText::new(icc_str)
-                                            .small()
-                                            .monospace()
-                                            .color(if is_reg { t.text_dim } else { t.text_faint }),
-                                    );
+                                        ui.label(RichText::new("—").color(t.text_faint));
+                                        ui.label(RichText::new("—").color(t.text_faint));
+                                    }
 
                                     ui.end_row();
                                 }
@@ -1559,6 +1775,9 @@ impl EpmiGuiApp {
         if let Some(s) = clicked_slot {
             self.select_slot(s);
             self.show_right_dock = true;
+        }
+        if let Some(run) = action {
+            run(self);
         }
     }
 
@@ -1611,10 +1830,9 @@ impl EpmiGuiApp {
                         }
                     }
 
-                    let load_btn = egui::Button::new(
-                        RichText::new("Laden").strong().color(t.accent_text),
-                    )
-                    .fill(t.accent);
+                    let load_btn =
+                        egui::Button::new(RichText::new("Laden").strong().color(t.accent_text))
+                            .fill(t.accent);
                     if ui.add(load_btn).clicked() {
                         match parse_emx_file(self.emx_input_path.trim()) {
                             Ok(pkg) => {
