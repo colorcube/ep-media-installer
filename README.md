@@ -84,7 +84,9 @@ cargo run -p epmi-gui
   - **12 PhotoCraft & KDE Themes:** `KDE Breeze Dark` (default), `KDE Breeze Light`, `Pro Dunkel`, `Pro Mittelgrau`, `Pro Hellgrau`, `Pro Hell`, `Studio Dunkel`, `Studio Hell`, `GNOME Adwaita Dunkel`, `GNOME Adwaita Hell`, `Solarized Dunkel`, `Klassisch Dunkel`.
   - **User-Friendly Inspector Dock:** Clear German photography terms with a collapsible `5. Technische Details (Expertenansicht)` section for low-level IDs.
 
----
+## About the development
+
+LumaPrint was developed with extensive help from AI. The code, the tests and the documentation were written by Google's Gemini and Anthropic's Claude under my direction. Requirements, design decisions, review and all tests with real hardware are my own.
 
 ## License
 
