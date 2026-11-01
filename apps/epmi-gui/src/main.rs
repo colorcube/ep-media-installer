@@ -8,6 +8,9 @@
 //! - All 27 Epson SureColor models supported in the Cloud Catalog
 //! - Intuitive 1-click installation workflow for `.emx` packages and Cloud profiles
 
+#[macro_use]
+mod i18n;
+mod de;
 mod theme;
 
 use std::path::PathBuf;
@@ -41,7 +44,7 @@ enum WorkspaceView {
 /// Native Linux/KDE file dialog (`kdialog`, fallback `zenity`) for opening or saving a file.
 /// `patterns` is a space-separated glob list such as `"*.icc *.icm"`.
 fn native_file_dialog(title: &str, label: &str, patterns: &str, save: bool) -> Option<String> {
-    let kde_filter = format!("{label} ({patterns})|Alle Dateien (*)");
+    let kde_filter = format!("{label} ({patterns})|{}", tr!("All files (*)"));
     let kde_mode = if save {
         "--getsavefilename"
     } else {
@@ -82,8 +85,8 @@ fn native_file_dialog(title: &str, label: &str, patterns: &str, save: bool) -> O
 /// Open a native file dialog to select a `.emx` file.
 fn open_native_emx_file_dialog() -> Option<String> {
     native_file_dialog(
-        "Epson Medienpaket (.emx) auswählen",
-        "Epson Media Package",
+        tr!("Select Epson media package (.emx)"),
+        tr!("Epson media package"),
         "*.emx *.emy",
         false,
     )
@@ -189,7 +192,7 @@ impl EpmiGuiApp {
             manual_host_mode: false,
             manual_host_input: initial_host.clone().unwrap_or_default(),
             printer_host: initial_host.clone().unwrap_or_default(),
-            printer_model_name: String::from("Kein Epson-Drucker verbunden"),
+            printer_model_name: String::from(tr!("No Epson printer connected")),
             slots,
             selected_slot: 1,
             install_target_slot: 1,
@@ -204,7 +207,9 @@ impl EpmiGuiApp {
             cloud_only_custom_emx: false,
             custom_media_json_path,
             show_about_modal: false,
-            status_msg: String::from("Suche nach Epson-Druckern in CUPS und im Netzwerk…"),
+            status_msg: String::from(tr!(
+                "Searching for Epson printers in CUPS and on the network…"
+            )),
             status_is_error: false,
         };
 
@@ -270,7 +275,7 @@ impl EpmiGuiApp {
         } else {
             self.selected_printer_idx = None;
             self.set_status(
-                "Kein Epson-Drucker automatisch gefunden. Klicke auf '🔍 Drucker suchen' oder wähle 'Manuelle Adresse…'.",
+                tr!("No Epson printer found automatically. Click '🔍 Search' or choose 'Manual address…'."),
                 false,
             );
         }
@@ -288,10 +293,7 @@ impl EpmiGuiApp {
             self.poll_printer_slots();
         } else {
             self.set_status(
-                format!(
-                    "Epson-Drucker '{}' ({}) ausgewählt. Klicke auf '🔄 Aktualisieren', sobald der Drucker eingeschaltet ist.",
-                    printer.model_name, printer.host
-                ),
+                tr!("Epson printer '{model}' ({host}) selected. Click '🔄 Refresh' once the printer is switched on.", model = printer.model_name, host = printer.host),
                 false,
             );
         }
@@ -300,7 +302,7 @@ impl EpmiGuiApp {
     fn verify_and_connect_manual_host(&mut self) {
         let candidate = self.manual_host_input.trim().to_string();
         if candidate.is_empty() {
-            self.set_status("Bitte eine IP-Adresse oder einen Hostnamen eingeben.", true);
+            self.set_status(tr!("Please enter an IP address or host name."), true);
             return;
         }
         match probe_epson_printer_snmp(&candidate, Duration::from_millis(1200)) {
@@ -330,9 +332,7 @@ impl EpmiGuiApp {
             }
             None => {
                 self.set_status(
-                    format!(
-                        "Unter '{candidate}' wurde kein unterstützter Epson-Drucker per SNMP gefunden (nur Epson-Drucker sind zulässig)."
-                    ),
+                    tr!("No supported Epson printer found via SNMP at '{candidate}' (only Epson printers are allowed).", candidate = candidate),
                     true,
                 );
             }
@@ -358,7 +358,7 @@ impl EpmiGuiApp {
 
     fn poll_printer_slots(&mut self) {
         if self.printer_host.trim().is_empty() {
-            self.set_status("Kein Epson-Drucker ausgewählt.", true);
+            self.set_status(tr!("No Epson printer selected."), true);
             return;
         }
         let client = SnmpMediaClient::new(self.printer_host.trim());
@@ -369,18 +369,17 @@ impl EpmiGuiApp {
                 self.select_slot(self.selected_slot);
                 self.install_target_slot = self.next_free_slot();
                 self.set_status(
-                    format!(
-                        "Verbunden mit {} ({}): {registered} von 30 Speicherplätzen im Drucker belegt.",
-                        self.printer_model_name, self.printer_host
-                    ),
+                    tr!("Connected to {model} ({host}): {registered} of 30 slots in the printer occupied.", model = self.printer_model_name, host = self.printer_host, registered = registered),
                     false,
                 );
             }
             Err(e) => {
                 self.set_status(
-                    format!(
-                        "Drucker {} ({}) antwortet nicht: {e}",
-                        self.printer_model_name, self.printer_host
+                    tr!(
+                        "Printer {model} ({host}) does not respond: {error}",
+                        model = self.printer_model_name,
+                        host = self.printer_host,
+                        error = e
                     ),
                     true,
                 );
@@ -407,22 +406,21 @@ impl EpmiGuiApp {
             }
         }
         self.set_status(
-            format!(
-                "{} Papiere in die Arbeitskopie übernommen ({}). Für Druckertreiber & LumaPrint: „Für das System installieren“.",
-                updated.len(),
-                written.join(", ")
-            ),
+            tr!("{count} papers taken over into the working copy ({files}). For the printer driver & LumaPrint: “Install for this computer”.", count = updated.len(), files = written.join(", ")),
             false,
         );
     }
 
     fn write_selected_slot_to_printer(&mut self) {
         if self.printer_host.trim().is_empty() {
-            self.set_status("Bitte zuerst oben einen Epson-Drucker auswählen.", true);
+            self.set_status(
+                tr!("Please select an Epson printer at the top first."),
+                true,
+            );
             return;
         }
         if self.editor_slot.media_name.trim().is_empty() {
-            self.set_status("Bitte zuerst einen Papiernamen eingeben.", true);
+            self.set_status(tr!("Please enter a paper name first."), true);
             return;
         }
         if self.editor_slot.user_media_id == 0 {
@@ -461,18 +459,16 @@ impl EpmiGuiApp {
                 self.install_target_slot = self.next_free_slot();
 
                 self.set_status(
-                    format!(
-                        "Speicherplatz {:02} ('{}') im Drucker gespeichert. Für Druckertreiber & LumaPrint: „Für das System installieren“.",
-                        self.selected_slot, verified.media_name
-                    ),
+                    tr!("Slot {slot} ('{name}') saved in the printer. For the printer driver & LumaPrint: “Install for this computer”.", slot = format!("{:02}", self.selected_slot), name = verified.media_name),
                     false,
                 );
             }
             Err(e) => {
                 self.set_status(
-                    format!(
-                        "Fehler beim Speichern auf Speicherplatz {:02}: {e}",
-                        self.selected_slot
+                    tr!(
+                        "Error saving slot {slot}: {error}",
+                        slot = format!("{:02}", self.selected_slot),
+                        error = e
                     ),
                     true,
                 );
@@ -482,7 +478,10 @@ impl EpmiGuiApp {
 
     fn clear_selected_slot_on_printer(&mut self) {
         if self.printer_host.trim().is_empty() {
-            self.set_status("Bitte zuerst oben einen Epson-Drucker auswählen.", true);
+            self.set_status(
+                tr!("Please select an Epson printer at the top first."),
+                true,
+            );
             return;
         }
         let client = SnmpMediaClient::new(self.printer_host.trim());
@@ -495,18 +494,19 @@ impl EpmiGuiApp {
                 self.sync_slots_to_driver();
                 self.install_target_slot = self.next_free_slot();
                 self.set_status(
-                    format!(
-                        "Speicherplatz {:02} im Drucker geleert und Treiberliste aktualisiert.",
-                        self.selected_slot
+                    tr!(
+                        "Slot {slot} cleared in the printer, working copy updated.",
+                        slot = format!("{:02}", self.selected_slot)
                     ),
                     false,
                 );
             }
             Err(e) => {
                 self.set_status(
-                    format!(
-                        "Fehler beim Leeren von Speicherplatz {:02}: {e}",
-                        self.selected_slot
+                    tr!(
+                        "Error clearing slot {slot}: {error}",
+                        slot = format!("{:02}", self.selected_slot),
+                        error = e
                     ),
                     true,
                 );
@@ -535,10 +535,7 @@ impl EpmiGuiApp {
         };
 
         self.set_status(
-            format!(
-                "'{}' in den Editor für Speicherplatz {:02} geladen. Klicke rechts auf '💾 Auf Drucker & System speichern', um es zu übertragen.",
-                pkg.media_name, clamped
-            ),
+            tr!("'{name}' loaded into the editor for slot {slot}. Click '💾 Save slot {slot} to printer' on the right to transfer it.", name = pkg.media_name, slot = format!("{clamped:02}")),
             false,
         );
     }
@@ -570,25 +567,28 @@ impl EpmiGuiApp {
                 self.install_target_slot = self.next_free_slot();
 
                 let icc_note = if saved_iccs.is_empty() {
-                    String::from("Standard-ICC")
+                    String::from(tr!("standard ICC"))
                 } else {
-                    format!("ICC '{}' installiert", entry.icc_profile)
+                    tr!("ICC '{profile}' taken over", profile = entry.icc_profile)
                 };
                 let printer_note = if client_opt.is_some() {
-                    format!("in Drucker-Speicherplatz {:02} übertragen", clamped)
+                    tr!(
+                        "transferred to printer slot {slot}",
+                        slot = format!("{clamped:02}")
+                    )
                 } else {
-                    format!("für Speicherplatz {:02} lokal gespeichert", clamped)
+                    tr!(
+                        "saved locally for slot {slot}",
+                        slot = format!("{clamped:02}")
+                    )
                 };
                 self.set_status(
-                    format!(
-                        "✅ '{}' erfolgreich {printer_note} ({icc_note}). Für Druckertreiber & LumaPrint: „Für das System installieren“.",
-                        pkg.media_name
-                    ),
+                    tr!("✅ '{name}' successfully {printer_note} ({icc_note}). For the printer driver & LumaPrint: “Install for this computer”.", name = pkg.media_name, printer_note = printer_note, icc_note = icc_note),
                     false,
                 );
             }
             Err(e) => {
-                self.set_status(format!("Installation fehlgeschlagen: {e}"), true);
+                self.set_status(tr!("Installation failed: {error}", error = e), true);
             }
         }
     }
@@ -610,7 +610,7 @@ impl EpmiGuiApp {
         let mut entries = entries_for_slots(&self.slots, &self.working_copy());
         if entries.is_empty() {
             self.set_status(
-                "Keine belegten Speicherplätze – bitte zuerst den Drucker auslesen.",
+                tr!("No occupied slots – please read the printer first."),
                 true,
             );
             return;
@@ -622,29 +622,29 @@ impl EpmiGuiApp {
             .and_then(|list| fetch_cloud_profiles(&mut entries, &list))
         {
             Ok(done) if !done.is_empty() => {
-                format!(" Profile aus der Epson-Cloud: {}.", done.join(", "))
+                tr!(
+                    " Profiles from the Epson cloud: {names}.",
+                    names = done.join(", ")
+                )
             }
             Ok(_) => String::new(),
-            Err(e) => format!(" (Epson-Cloud nicht erreichbar: {e})"),
+            Err(e) => tr!(" (Epson cloud not reachable: {error})", error = e),
         };
         let _ = save_custom_media_json(&self.custom_media_json_path, &entries);
         match install_system_media(&entries) {
             Ok(_) => self.set_status(
-                format!(
-                    "✅ {} Papier(e) für dieses System installiert – Druckertreiber und LumaPrint sind aktualisiert.{cloud_note}",
-                    entries.len()
-                ),
+                tr!("✅ {count} paper(s) installed for this computer – printer driver and LumaPrint are updated.{cloud_note}", count = entries.len(), cloud_note = cloud_note),
                 false,
             ),
-            Err(e) => self.set_status(format!("Installation fehlgeschlagen: {e}{cloud_note}"), true),
+            Err(e) => self.set_status(tr!("Installation failed: {error}{cloud_note}", error = e, cloud_note = cloud_note), true),
         }
     }
 
     /// Assigns an ICC profile file to the selected slot in the working copy.
     fn choose_icc_for_selected_slot(&mut self) {
         let Some(file) = native_file_dialog(
-            "Farbprofil (.icc) für das Papier auswählen",
-            "ICC-Profil",
+            tr!("Select color profile (.icc) for the paper"),
+            tr!("ICC profile"),
             "*.icc *.icm *.ICC *.ICM",
             false,
         ) else {
@@ -660,10 +660,7 @@ impl EpmiGuiApp {
                 .get(usize::from(slot.saturating_sub(1)))
                 .filter(|s| s.registered)
             else {
-                self.set_status(
-                    "Der Speicherplatz ist leer – bitte zuerst ein Papier speichern.",
-                    true,
-                );
+                self.set_status(tr!("The slot is empty – please save a paper first."), true);
                 return;
             };
             working.push(s.to_custom_media_entry(None));
@@ -677,21 +674,24 @@ impl EpmiGuiApp {
                 self.editor_icc_profile = entry.icc_profile.clone();
                 let _ = save_custom_media_json(&self.custom_media_json_path, &working);
                 self.set_status(
-                    format!(
-                        "Farbprofil '{}' Platz {slot:02} zugewiesen. Jetzt „Für das System installieren“.",
-                        self.editor_icc_profile
-                    ),
+                    tr!("Color profile '{profile}' assigned to slot {slot}. Now “Install for this computer”.", profile = self.editor_icc_profile, slot = format!("{slot:02}")),
                     false,
                 );
             }
-            Err(e) => self.set_status(format!("Farbprofil nicht übernommen: {e}"), true),
+            Err(e) => self.set_status(
+                tr!("Color profile not taken over: {error}", error = e),
+                true,
+            ),
         }
     }
 
     fn export_media_dialog(&mut self) {
-        let Some(file) =
-            native_file_dialog("Papiere exportieren", "epmi-Papierarchiv", "*.epmi", true)
-        else {
+        let Some(file) = native_file_dialog(
+            tr!("Export papers"),
+            tr!("epmi paper archive"),
+            "*.epmi",
+            true,
+        ) else {
             return;
         };
         let path = if file.ends_with(".epmi") {
@@ -702,20 +702,24 @@ impl EpmiGuiApp {
         let entries = entries_for_slots(&self.slots, &self.working_copy());
         match export_media(&entries, std::path::Path::new(&path)) {
             Ok(()) => self.set_status(
-                format!(
-                    "{} Papier(e) mit Farbprofilen exportiert: {path}",
-                    entries.len()
+                tr!(
+                    "{count} paper(s) with color profiles exported: {path}",
+                    count = entries.len(),
+                    path = path
                 ),
                 false,
             ),
-            Err(e) => self.set_status(format!("Export fehlgeschlagen: {e}"), true),
+            Err(e) => self.set_status(tr!("Export failed: {error}", error = e), true),
         }
     }
 
     fn import_media_dialog(&mut self) {
-        let Some(file) =
-            native_file_dialog("Papiere importieren", "epmi-Papierarchiv", "*.epmi", false)
-        else {
+        let Some(file) = native_file_dialog(
+            tr!("Import papers"),
+            tr!("epmi paper archive"),
+            "*.epmi",
+            false,
+        ) else {
             return;
         };
         match import_media(std::path::Path::new(&file)) {
@@ -726,25 +730,34 @@ impl EpmiGuiApp {
                 let _ = save_custom_media_json(&self.custom_media_json_path, &working);
                 self.select_slot(self.selected_slot);
                 self.set_status(
-                    format!("{count} Papier(e) importiert. Jetzt „Für das System installieren“."),
+                    tr!(
+                        "{count} paper(s) imported. Now “Install for this computer”.",
+                        count = count
+                    ),
                     false,
                 );
             }
-            Err(e) => self.set_status(format!("Import fehlgeschlagen: {e}"), true),
+            Err(e) => self.set_status(tr!("Import failed: {error}", error = e), true),
         }
     }
 
     /// Helper widget to select the target slot (`1..30`) for 1-click installations.
     fn draw_target_slot_selector(&mut self, ui: &mut Ui, id_salt: &str) {
         let t = self.tokens;
-        ui.label(RichText::new("Ziel-Speicherplatz:").color(t.text_dim));
+        ui.label(RichText::new(tr!("Target slot:")).color(t.text_dim));
         let cur = self.install_target_slot.clamp(1, 30);
         let cur_status = self
             .slots
             .get(usize::from(cur - 1))
             .filter(|s| s.registered)
-            .map(|s| format!("Platz {:02} (Belegt: {})", cur, s.media_name))
-            .unwrap_or_else(|| format!("Platz {:02} (Frei)", cur));
+            .map(|s| {
+                tr!(
+                    "Slot {slot} (occupied: {name})",
+                    slot = format!("{cur:02}"),
+                    name = s.media_name
+                )
+            })
+            .unwrap_or_else(|| tr!("Slot {slot} (free)", slot = format!("{cur:02}")));
 
         egui::ComboBox::from_id_salt(id_salt)
             .selected_text(cur_status)
@@ -755,8 +768,16 @@ impl EpmiGuiApp {
                         .slots
                         .get(usize::from(idx - 1))
                         .filter(|s| s.registered)
-                        .map(|s| format!("Platz {:02}: ● {}", idx, s.media_name))
-                        .unwrap_or_else(|| format!("Platz {:02}: ○ — Frei —", idx));
+                        .map(|s| {
+                            tr!(
+                                "Slot {slot}: ● {name}",
+                                slot = format!("{idx:02}"),
+                                name = s.media_name
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            tr!("Slot {slot}: ○ — free —", slot = format!("{idx:02}"))
+                        });
                     if ui
                         .selectable_value(&mut self.install_target_slot, idx, s_lbl)
                         .clicked()
@@ -772,8 +793,10 @@ impl EpmiGuiApp {
             .get(usize::from(cur - 1))
             .is_some_and(|s| s.registered)
             && ui
-                .button(format!("✨ Freier Platz {:02}", next_free))
-                .on_hover_text("Wählt automatisch den nächsten freien Speicherplatz im Drucker")
+                .button(tr!("✨ Free slot {slot}", slot = format!("{next_free:02}")))
+                .on_hover_text(tr!(
+                    "Selects the next free slot in the printer automatically"
+                ))
                 .clicked()
         {
             self.install_target_slot = next_free;
@@ -797,8 +820,8 @@ impl EpmiGuiApp {
             .show(ctx, |ui| {
                 // Row 1: Classic Menu Bar
                 egui::menu::bar(ui, |ui| {
-                    ui.menu_button("Datei", |ui| {
-                        if ui.button("📂 Lokale .emx-Datei öffnen…").clicked() {
+                    ui.menu_button(tr!("File"), |ui| {
+                        if ui.button(tr!("📂 Open local .emx file…")).clicked() {
                             self.active_view = WorkspaceView::EmxPackages;
                             if let Some(picked) = open_native_emx_file_dialog() {
                                 self.emx_input_path = picked.clone();
@@ -809,28 +832,28 @@ impl EpmiGuiApp {
                             ui.close_menu();
                         }
                         if ui
-                            .button("💾 Mit Druckertreiber & LumaPrint synchronisieren")
+                            .button(tr!("💾 Update working copy from printer"))
                             .clicked()
                         {
                             self.sync_slots_to_driver();
                             ui.close_menu();
                         }
                         ui.separator();
-                        if ui.button("Beenden").clicked() {
+                        if ui.button(tr!("Quit")).clicked() {
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
                     });
 
-                    ui.menu_button("Drucker", |ui| {
+                    ui.menu_button(tr!("Printer"), |ui| {
                         if ui
-                            .button("🔍 Epson-Drucker in CUPS & Netzwerk suchen")
+                            .button(tr!("🔍 Search Epson printers in CUPS & network"))
                             .clicked()
                         {
                             self.refresh_printer_discovery(&[]);
                             ui.close_menu();
                         }
                         if ui
-                            .button("🔄 Alle 30 Speicherplätze vom Drucker neu laden")
+                            .button(tr!("🔄 Reload all 30 slots from the printer"))
                             .clicked()
                         {
                             self.poll_printer_slots();
@@ -838,9 +861,9 @@ impl EpmiGuiApp {
                         }
                         ui.separator();
                         if ui
-                            .button(format!(
-                                "💾 Aktuellen Platz {:02} im Drucker speichern",
-                                self.selected_slot
+                            .button(tr!(
+                                "💾 Save current slot {slot} in the printer",
+                                slot = format!("{:02}", self.selected_slot)
                             ))
                             .clicked()
                         {
@@ -848,9 +871,9 @@ impl EpmiGuiApp {
                             ui.close_menu();
                         }
                         if ui
-                            .button(format!(
-                                "🗑 Aktuellen Platz {:02} im Drucker leeren",
-                                self.selected_slot
+                            .button(tr!(
+                                "🗑 Clear current slot {slot} in the printer",
+                                slot = format!("{:02}", self.selected_slot)
                             ))
                             .clicked()
                         {
@@ -859,18 +882,15 @@ impl EpmiGuiApp {
                         }
                     });
 
-                    ui.menu_button("Einstellungen", |ui| {
-                        ui.checkbox(
-                            &mut self.show_right_dock,
-                            "Rechtes Papier-Einstellungs-Dock anzeigen",
-                        );
+                    ui.menu_button(tr!("Settings"), |ui| {
+                        ui.checkbox(&mut self.show_right_dock, tr!("Show paper settings dock"));
                         ui.checkbox(
                             &mut self.show_empty_slots,
-                            "Auch freie Speicherplätze (1..30) in der Tabelle zeigen",
+                            tr!("Also show free slots (1..30) in the table"),
                         );
                         ui.separator();
                         ui.label(
-                            RichText::new("Farbschema (PhotoCraft & KDE Themes):")
+                            RichText::new(tr!("Color scheme (PhotoCraft & KDE themes):"))
                                 .strong()
                                 .color(t.text_dim),
                         );
@@ -883,11 +903,7 @@ impl EpmiGuiApp {
                             }
                         }
                         ui.separator();
-                        ui.label(
-                            RichText::new("UI-Skalierung:")
-                                .strong()
-                                .color(t.text_dim),
-                        );
+                        ui.label(RichText::new(tr!("UI scale:")).strong().color(t.text_dim));
                         ui.horizontal(|ui| {
                             for (scale, lbl) in [
                                 (0.90_f32, "90%"),
@@ -903,10 +919,22 @@ impl EpmiGuiApp {
                                 }
                             }
                         });
+                        ui.separator();
+                        ui.label(RichText::new(tr!("Language:")).strong().color(t.text_dim));
+                        ui.horizontal(|ui| {
+                            for lang in i18n::Language::ALL {
+                                if ui
+                                    .selectable_label(i18n::language() == lang, lang.label())
+                                    .clicked()
+                                {
+                                    i18n::set_language(lang);
+                                }
+                            }
+                        });
                     });
 
-                    ui.menu_button("Hilfe", |ui| {
-                        if ui.button("ℹ Über epmi…").clicked() {
+                    ui.menu_button(tr!("Help"), |ui| {
+                        if ui.button(tr!("ℹ About epmi…")).clicked() {
                             self.show_about_modal = true;
                             ui.close_menu();
                         }
@@ -921,16 +949,16 @@ impl EpmiGuiApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
 
-                    ui.label(RichText::new("Epson-Drucker:").color(t.text_dim));
+                    ui.label(RichText::new(tr!("Epson printer:")).color(t.text_dim));
 
                     let selected_printer_text = if self.manual_host_mode {
-                        String::from("⌨ Manuelle Adresse…")
+                        String::from(tr!("⌨ Manual address…"))
                     } else if let Some(idx) = self.selected_printer_idx
                         && let Some(p) = self.discovered_printers.get(idx)
                     {
                         p.display_label()
                     } else {
-                        String::from("— Kein Epson-Drucker gefunden —")
+                        String::from(tr!("— No Epson printer found —"))
                     };
 
                     let mut newly_selected_idx: Option<usize> = None;
@@ -939,8 +967,8 @@ impl EpmiGuiApp {
                         .width(310.0)
                         .show_ui(ui, |ui| {
                             for (idx, p) in self.discovered_printers.iter().enumerate() {
-                                let is_sel =
-                                    !self.manual_host_mode && self.selected_printer_idx == Some(idx);
+                                let is_sel = !self.manual_host_mode
+                                    && self.selected_printer_idx == Some(idx);
                                 if ui.selectable_label(is_sel, p.display_label()).clicked() {
                                     newly_selected_idx = Some(idx);
                                 }
@@ -951,7 +979,7 @@ impl EpmiGuiApp {
                             if ui
                                 .selectable_label(
                                     self.manual_host_mode,
-                                    "⌨ Manuelle IP / Hostname prüfen…",
+                                    tr!("⌨ Check manual IP / host name…"),
                                 )
                                 .clicked()
                             {
@@ -971,13 +999,13 @@ impl EpmiGuiApp {
                         ui.add(
                             egui::TextEdit::singleline(&mut self.manual_host_input)
                                 .desired_width(115.0)
-                                .hint_text("IP / Hostname"),
+                                .hint_text(tr!("IP / host name")),
                         );
                         if ui
-                            .button("Verbinden")
-                            .on_hover_text(
-                                "Prüft per SNMP, ob es sich um einen Epson-Drucker handelt, und verbindet ihn",
-                            )
+                            .button(tr!("Connect"))
+                            .on_hover_text(tr!(
+                                "Checks via SNMP that it is an Epson printer and connects it"
+                            ))
                             .clicked()
                         {
                             self.verify_and_connect_manual_host();
@@ -985,17 +1013,17 @@ impl EpmiGuiApp {
                     }
 
                     if ui
-                        .add(egui::Button::new("🔍 Suchen").min_size(Vec2::new(75.0, 28.0)))
-                        .on_hover_text(
-                            "Sucht automatisch in CUPS und im lokalen Netzwerk nach Epson-Druckern",
-                        )
+                        .add(egui::Button::new(tr!("🔍 Search")).min_size(Vec2::new(75.0, 28.0)))
+                        .on_hover_text(tr!(
+                            "Searches CUPS and the local network for Epson printers"
+                        ))
                         .clicked()
                     {
                         self.refresh_printer_discovery(&[]);
                     }
 
                     let poll_btn = egui::Button::new(
-                        RichText::new("🔄 Aktualisieren")
+                        RichText::new(tr!("🔄 Refresh"))
                             .strong()
                             .color(t.accent_text),
                     )
@@ -1003,7 +1031,7 @@ impl EpmiGuiApp {
                     .min_size(Vec2::new(115.0, 28.0));
                     if ui
                         .add(poll_btn)
-                        .on_hover_text("Liest alle 30 Speicherplätze frisch vom Epson-Drucker ein")
+                        .on_hover_text(tr!("Reads all 30 slots from the Epson printer again"))
                         .clicked()
                     {
                         self.poll_printer_slots();
@@ -1013,20 +1041,19 @@ impl EpmiGuiApp {
 
                     // Workspace View Switcher
                     for (view, label) in [
-                        (WorkspaceView::PrinterSlots, "🖨 Speicherplätze (1..30)"),
-                        (WorkspaceView::CloudCatalog, "☁ Epson Cloud-Katalog"),
-                        (WorkspaceView::EmxPackages, "📦 Lokale .emx-Datei"),
+                        (WorkspaceView::PrinterSlots, tr!("🖨 Slots (1..30)")),
+                        (WorkspaceView::CloudCatalog, tr!("☁ Epson cloud catalog")),
+                        (WorkspaceView::EmxPackages, tr!("📦 Local .emx file")),
                     ] {
                         let is_active = self.active_view == view;
-                        let btn = egui::Button::new(
-                            RichText::new(label).strong().color(if is_active {
+                        let btn =
+                            egui::Button::new(RichText::new(label).strong().color(if is_active {
                                 t.accent_text
                             } else {
                                 t.text
-                            }),
-                        )
-                        .fill(if is_active { t.accent } else { t.card })
-                        .min_size(Vec2::new(155.0, 28.0));
+                            }))
+                            .fill(if is_active { t.accent } else { t.card })
+                            .min_size(Vec2::new(155.0, 28.0));
                         if ui.add(btn).clicked() {
                             self.active_view = view;
                         }
@@ -1034,7 +1061,7 @@ impl EpmiGuiApp {
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let dock_btn = egui::Button::new(
-                            RichText::new("⚙ Papier-Editor").color(if self.show_right_dock {
+                            RichText::new(tr!("⚙ Paper editor")).color(if self.show_right_dock {
                                 t.accent
                             } else {
                                 t.text_dim
@@ -1042,7 +1069,7 @@ impl EpmiGuiApp {
                         );
                         if ui
                             .add(dock_btn)
-                            .on_hover_text("Rechtes Papier-Einstellungs-Dock ein-/ausblenden")
+                            .on_hover_text(tr!("Show/hide paper settings dock"))
                             .clicked()
                         {
                             self.show_right_dock = !self.show_right_dock;
@@ -1066,7 +1093,7 @@ impl EpmiGuiApp {
                     let occupied = self.slots.iter().filter(|s| s.registered).count();
                     let badge_col = if occupied > 0 { t.success } else { t.text_dim };
                     ui.label(
-                        RichText::new(format!("● {occupied}/30 Plätze belegt"))
+                        RichText::new(tr!("● {occupied}/30 slots occupied", occupied = occupied))
                             .strong()
                             .color(badge_col),
                     );
@@ -1081,10 +1108,7 @@ impl EpmiGuiApp {
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let write_btn = egui::Button::new(
-                            RichText::new(format!(
-                                "💾 Platz {:02} auf Drucker & System speichern",
-                                self.selected_slot
-                            ))
+                            RichText::new(tr!("💾 Save slot {slot} to printer", slot = format!("{:02}", self.selected_slot)))
                             .strong()
                             .color(t.accent_text),
                         )
@@ -1094,7 +1118,7 @@ impl EpmiGuiApp {
                         if ui
                             .add(write_btn)
                             .on_hover_text(
-                                "Speichert das rechts eingestellte Papier im Drucker und aktualisiert CUPS & LumaPrint",
+                                tr!("Saves the paper set on the right in the printer slot; then use “Install for this computer”"),
                             )
                             .clicked()
                         {
@@ -1127,9 +1151,9 @@ impl EpmiGuiApp {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new(format!(
-                                    "★ Papier-Einstellungen — Platz {:02}",
-                                    self.selected_slot
+                                RichText::new(tr!(
+                                    "★ Paper settings — slot {slot}",
+                                    slot = format!("{:02}", self.selected_slot)
                                 ))
                                 .strong()
                                 .color(t.accent),
@@ -1139,9 +1163,9 @@ impl EpmiGuiApp {
                                 |ui| {
                                     let is_reg = self.editor_slot.registered;
                                     let (lbl, col) = if is_reg {
-                                        ("BELEGT", t.success)
+                                        (tr!("OCCUPIED"), t.success)
                                     } else {
-                                        ("FREI", t.text_faint)
+                                        (tr!("FREE"), t.text_faint)
                                     };
                                     ui.label(RichText::new(lbl).small().strong().color(col));
                                 },
@@ -1152,19 +1176,14 @@ impl EpmiGuiApp {
                         ui.add_space(6.0);
 
                         // Section 1: Speicherplatz & Papiername
-                        self.draw_dock_section(
-                            ui,
-                            "1. Speicherplatz & Papiername",
-                            true,
-                            |app, ui| {
-                                app.draw_dock_identity_section(ui);
-                            },
-                        );
+                        self.draw_dock_section(ui, tr!("1. Slot & paper name"), true, |app, ui| {
+                            app.draw_dock_identity_section(ui);
+                        });
 
                         // Section 2: Mechanische Papiereinstellungen
                         self.draw_dock_section(
                             ui,
-                            "2. Mechanische Einstellungen",
+                            tr!("2. Mechanical settings"),
                             true,
                             |app, ui| {
                                 app.draw_dock_mechanics_section(ui);
@@ -1174,7 +1193,7 @@ impl EpmiGuiApp {
                         // Section 3: Farbprofil (ICC) & Tintenauftrag
                         self.draw_dock_section(
                             ui,
-                            "3. Farbprofil (ICC) & Tintenauftrag",
+                            tr!("3. Color profile (ICC) & ink density"),
                             true,
                             |app, ui| {
                                 app.draw_dock_driver_section(ui);
@@ -1184,7 +1203,7 @@ impl EpmiGuiApp {
                         // Section 4: Speichern / Löschen
                         self.draw_dock_section(
                             ui,
-                            "4. Aktionen (Drucker & Treiber)",
+                            tr!("4. Actions (printer & driver)"),
                             true,
                             |app, ui| {
                                 app.draw_dock_actions_section(ui);
@@ -1194,7 +1213,7 @@ impl EpmiGuiApp {
                         // Section 5: Technische Details (Expertenansicht, standardmäßig eingeklappt)
                         self.draw_dock_section(
                             ui,
-                            "5. Technische Details (Expertenansicht)",
+                            tr!("5. Technical details (expert view)"),
                             false,
                             |app, ui| {
                                 app.draw_dock_expert_section(ui);
@@ -1233,16 +1252,20 @@ impl EpmiGuiApp {
             .spacing([14.0, 10.0])
             .min_col_width(135.0)
             .show(ui, |ui| {
-                ui.label(RichText::new("Speicherplatz:").color(t.text_dim));
+                ui.label(RichText::new(tr!("Slot:")).color(t.text_dim));
                 let mut new_sel = current_slot;
                 let cur_name = self
                     .slots
                     .get(usize::from(current_slot - 1))
                     .filter(|s| s.registered)
                     .map(|s| s.media_name.as_str())
-                    .unwrap_or("Frei");
+                    .unwrap_or(tr!("Free"));
                 egui::ComboBox::from_id_salt("dock_slot_selector")
-                    .selected_text(format!("Platz {:02} ({cur_name})", current_slot))
+                    .selected_text(tr!(
+                        "Slot {slot} ({name})",
+                        slot = format!("{current_slot:02}"),
+                        name = cur_name
+                    ))
                     .width(230.0)
                     .show_ui(ui, |ui| {
                         for idx in 1..=30_u8 {
@@ -1251,8 +1274,12 @@ impl EpmiGuiApp {
                                 .get(usize::from(idx - 1))
                                 .filter(|s| s.registered)
                                 .map(|s| s.media_name.as_str())
-                                .unwrap_or("— Frei —");
-                            let lbl = format!("Platz {:02}: {}", idx, s_name);
+                                .unwrap_or(tr!("— free —"));
+                            let lbl = tr!(
+                                "Slot {slot}: {name}",
+                                slot = format!("{idx:02}"),
+                                name = s_name
+                            );
                             let _ = ui.selectable_value(&mut new_sel, idx, lbl);
                         }
                     });
@@ -1261,23 +1288,23 @@ impl EpmiGuiApp {
                     self.select_slot(new_sel);
                 }
 
-                ui.label(RichText::new("Name am Display:").color(t.text_dim));
+                ui.label(RichText::new(tr!("Name on display:")).color(t.text_dim));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.editor_slot.media_name)
                         .desired_width(230.0)
-                        .hint_text("z. B. Hahnemühle Photo Rag 308"),
+                        .hint_text(tr!("e.g. Hahnemühle Photo Rag 308")),
                 );
                 ui.end_row();
 
-                ui.label(RichText::new("Basis-Papiertyp:").color(t.text_dim));
+                ui.label(RichText::new(tr!("Base paper type:")).color(t.text_dim));
                 let cur_base = find_base_media_by_sn_id(self.editor_slot.base_sn_id);
                 let cur_base_lbl = cur_base.map_or_else(
-                    || format!("Benutzerdefiniert ({})", self.editor_slot.base_sn_id),
+                    || tr!("Custom ({code})", code = self.editor_slot.base_sn_id),
                     |b| {
                         let ink = if b.is_matte {
-                            "Matt · MK"
+                            tr!("Matte · MK")
                         } else {
-                            "Foto · PK"
+                            tr!("Photo · PK")
                         };
                         format!("{} ({})", b.name, ink)
                     },
@@ -1288,9 +1315,9 @@ impl EpmiGuiApp {
                     .show_ui(ui, |ui| {
                         for preset in BASE_MEDIA_SPECS {
                             let ink = if preset.is_matte {
-                                "Matt · MK"
+                                tr!("Matte · MK")
                             } else {
-                                "Foto · PK"
+                                tr!("Photo · PK")
                             };
                             let lbl = format!("{} ({})", preset.name, ink);
                             if ui
@@ -1310,26 +1337,28 @@ impl EpmiGuiApp {
                     });
                 ui.end_row();
 
-                ui.label(RichText::new("Schwarztinte:").color(t.text_dim));
+                ui.label(RichText::new(tr!("Black ink:")).color(t.text_dim));
                 let uses_mk = cur_base.is_some_and(|b| b.is_matte);
                 let (ink_txt, ink_col) = if uses_mk {
-                    ("Matte Black (MK) — Fine Art / Matt", t.warning)
+                    (tr!("Matte Black (MK) — fine art / matte"), t.warning)
                 } else {
-                    ("Photo Black (PK) — Foto / Baryt", t.accent)
+                    (tr!("Photo Black (PK) — photo / baryta"), t.accent)
                 };
                 ui.label(RichText::new(ink_txt).strong().color(ink_col));
                 ui.end_row();
 
-                ui.label(RichText::new("Papierkategorie:").color(t.text_dim));
+                ui.label(RichText::new(tr!("Paper category:")).color(t.text_dim));
                 egui::ComboBox::from_id_salt("dock_category_combo")
-                    .selected_text(media_category_label(self.editor_slot.media_category))
+                    .selected_text(i18n::tr_dyn(media_category_label(
+                        self.editor_slot.media_category,
+                    )))
                     .width(230.0)
                     .show_ui(ui, |ui| {
                         for cat_code in [1_u8, 2, 3, 4, 5, 6, 254] {
                             ui.selectable_value(
                                 &mut self.editor_slot.media_category,
                                 cat_code,
-                                media_category_label(cat_code),
+                                i18n::tr_dyn(media_category_label(cat_code)),
                             );
                         }
                     });
@@ -1345,22 +1374,22 @@ impl EpmiGuiApp {
             .spacing([14.0, 10.0])
             .min_col_width(135.0)
             .show(ui, |ui| {
-                ui.label(RichText::new("Walzenabstand:").color(t.text_dim));
+                ui.label(RichText::new(tr!("Platen gap:")).color(t.text_dim));
                 egui::ComboBox::from_id_salt("dock_platen_gap_combo")
-                    .selected_text(platen_gap_label(self.editor_slot.platen_gap))
+                    .selected_text(i18n::tr_dyn(platen_gap_label(self.editor_slot.platen_gap)))
                     .width(230.0)
                     .show_ui(ui, |ui| {
                         for gap_code in [9_u8, 12, 15, 21, 24] {
                             ui.selectable_value(
                                 &mut self.editor_slot.platen_gap,
                                 gap_code,
-                                platen_gap_label(gap_code),
+                                i18n::tr_dyn(platen_gap_label(gap_code)),
                             );
                         }
                     });
                 ui.end_row();
 
-                ui.label(RichText::new("Papierdicke:").color(t.text_dim));
+                ui.label(RichText::new(tr!("Paper thickness:")).color(t.text_dim));
                 let mut mm = self.editor_slot.thickness_mm();
                 if ui
                     .add(
@@ -1374,28 +1403,28 @@ impl EpmiGuiApp {
                 }
                 ui.end_row();
 
-                ui.label(RichText::new("Trocknungszeit:").color(t.text_dim));
+                ui.label(RichText::new(tr!("Drying time:")).color(t.text_dim));
                 ui.add(egui::Slider::new(&mut self.editor_slot.drying_time, 0..=100).suffix(" %"));
                 ui.end_row();
 
-                ui.label(RichText::new("Vorschub (Blatt):").color(t.text_dim));
+                ui.label(RichText::new(tr!("Feed offset (sheet):")).color(t.text_dim));
                 ui.add(
                     egui::Slider::new(&mut self.editor_slot.cut_sheet_feed_offset, -50..=50)
                         .suffix(" %"),
                 );
                 ui.end_row();
 
-                ui.label(RichText::new("Vorschub (Rolle):").color(t.text_dim));
+                ui.label(RichText::new(tr!("Feed offset (roll):")).color(t.text_dim));
                 ui.add(
                     egui::Slider::new(&mut self.editor_slot.roll_paper_feed_offset, -50..=50)
                         .suffix(" %"),
                 );
                 ui.end_row();
 
-                ui.label(RichText::new("Breitenprüfung:").color(t.text_dim));
+                ui.label(RichText::new(tr!("Width check:")).color(t.text_dim));
                 let mut check_on = self.editor_slot.paper_width_check != 0;
                 if ui
-                    .checkbox(&mut check_on, "Papierbreite vor dem Drucken prüfen")
+                    .checkbox(&mut check_on, tr!("Check paper width before printing"))
                     .changed()
                 {
                     self.editor_slot.paper_width_check = u8::from(check_on);
@@ -1412,7 +1441,7 @@ impl EpmiGuiApp {
             .spacing([14.0, 10.0])
             .min_col_width(135.0)
             .show(ui, |ui| {
-                ui.label(RichText::new("Farbprofil (.icc):").color(t.text_dim));
+                ui.label(RichText::new(tr!("Color profile (.icc):")).color(t.text_dim));
                 let mut choose = false;
                 ui.horizontal(|ui| {
                     ui.add(
@@ -1422,7 +1451,7 @@ impl EpmiGuiApp {
                     );
                     choose = ui
                         .button("📂")
-                        .on_hover_text("Farbprofil-Datei für dieses Papier auswählen")
+                        .on_hover_text(tr!("Select color profile file for this paper"))
                         .clicked();
                 });
                 if choose {
@@ -1430,7 +1459,7 @@ impl EpmiGuiApp {
                 }
                 ui.end_row();
 
-                ui.label(RichText::new("Tintenauftrag:").color(t.text_dim));
+                ui.label(RichText::new(tr!("Ink density:")).color(t.text_dim));
                 ui.add(egui::Slider::new(&mut self.editor_print_duty, -50..=50).suffix(" %"));
                 ui.end_row();
             });
@@ -1440,9 +1469,9 @@ impl EpmiGuiApp {
         let t = self.tokens;
         ui.vertical_centered_justified(|ui| {
             let write_btn = egui::Button::new(
-                RichText::new(format!(
-                    "💾 Platz {:02} auf Drucker & System speichern",
-                    self.selected_slot
+                RichText::new(tr!(
+                    "💾 Save slot {slot} to printer",
+                    slot = format!("{:02}", self.selected_slot)
                 ))
                 .strong()
                 .color(t.accent_text),
@@ -1457,9 +1486,9 @@ impl EpmiGuiApp {
             ui.add_space(4.0);
 
             let clear_btn = egui::Button::new(
-                RichText::new(format!(
-                    "🗑 Speicherplatz {:02} im Drucker leeren",
-                    self.selected_slot
+                RichText::new(tr!(
+                    "🗑 Clear slot {slot} in the printer",
+                    slot = format!("{:02}", self.selected_slot)
                 ))
                 .color(t.danger),
             )
@@ -1480,7 +1509,7 @@ impl EpmiGuiApp {
             .spacing([14.0, 8.0])
             .min_col_width(135.0)
             .show(ui, |ui| {
-                ui.label(RichText::new("Medien-ID (32-Bit):").color(t.text_dim));
+                ui.label(RichText::new(tr!("Media ID (32-bit):")).color(t.text_dim));
                 ui.horizontal(|ui| {
                     let mut dec_id = self.editor_slot.user_media_id.to_string();
                     if ui
@@ -1491,8 +1520,8 @@ impl EpmiGuiApp {
                         self.editor_slot.user_media_id = parsed;
                     }
                     if ui
-                        .button("Neu vergeben")
-                        .on_hover_text("Erzeugt eine freie Benutzer-Medien-ID (910000001..)")
+                        .button(tr!("Assign new"))
+                        .on_hover_text(tr!("Generates a free user media ID (910000001..)"))
                         .clicked()
                     {
                         self.editor_slot.user_media_id =
@@ -1501,24 +1530,28 @@ impl EpmiGuiApp {
                 });
                 ui.end_row();
 
-                ui.label(RichText::new("Treiber-Slot-ID:").color(t.text_dim));
+                ui.label(RichText::new(tr!("Driver slot ID:")).color(t.text_dim));
                 ui.label(
-                    RichText::new(format!(
-                        "{} (Basis-Code {})",
-                        1900 + u16::from(self.selected_slot),
-                        self.editor_slot.base_sn_id
+                    RichText::new(tr!(
+                        "{id} (base code {code})",
+                        id = 1900 + u16::from(self.selected_slot),
+                        code = self.editor_slot.base_sn_id
                     ))
                     .monospace()
                     .color(t.text_dim),
                 );
                 ui.end_row();
 
-                ui.label(RichText::new("CUPS PPD-Schlüssel:").color(t.text_dim));
+                ui.label(RichText::new(tr!("CUPS PPD key:")).color(t.text_dim));
                 ui.label(
-                    RichText::new(format!("{preview_key} ({}/32 Zeichen)", preview_key.len()))
-                        .small()
-                        .monospace()
-                        .color(t.text_faint),
+                    RichText::new(tr!(
+                        "{key} ({len}/32 characters)",
+                        key = preview_key,
+                        len = preview_key.len()
+                    ))
+                    .small()
+                    .monospace()
+                    .color(t.text_faint),
                 );
                 ui.end_row();
             });
@@ -1551,16 +1584,13 @@ impl EpmiGuiApp {
 
         ui.horizontal(|ui| {
             ui.heading(
-                RichText::new(format!(
-                    "Speicherplätze im Drucker (1..30) — {}",
-                    self.printer_model_name
-                ))
+                RichText::new(tr!("Slots in the printer (1..30) — {model}", model = self.printer_model_name))
                 .strong()
                 .color(t.text),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let install_btn = egui::Button::new(
-                    RichText::new("🖥 Für das System installieren")
+                    RichText::new(tr!("🖥 Install for this computer"))
                         .strong()
                         .color(t.accent_text),
                 )
@@ -1568,37 +1598,37 @@ impl EpmiGuiApp {
                 if ui
                     .add(install_btn)
                     .on_hover_text(
-                        "Papierliste und Farbprofile für alle Benutzer, den CUPS-Druckertreiber und LumaPrint installieren (Administrator-Passwort). Profile von Epson-Cloud-Papieren werden automatisch geladen. Wie unter Windows/macOS nötig auf jedem Rechner, der druckt.",
+                        tr!("Installs paper list and color profiles for all users, the CUPS printer driver and LumaPrint (administrator password). Profiles of Epson cloud papers are fetched automatically. As on Windows/macOS, this is needed on every computer that prints."),
                     )
                     .clicked()
                 {
                     action = Some(Self::install_for_system);
                 }
                 if ui
-                    .button("📥 Importieren…")
-                    .on_hover_text("Papiere mit Farbprofilen von einem anderen Rechner übernehmen (.epmi)")
+                    .button(tr!("📥 Import…"))
+                    .on_hover_text(tr!("Take over papers with color profiles from another computer (.epmi)"))
                     .clicked()
                 {
                     action = Some(Self::import_media_dialog);
                 }
                 if ui
-                    .button("📤 Exportieren…")
-                    .on_hover_text("Papiere mit Farbprofilen für einen anderen Rechner sichern (.epmi)")
+                    .button(tr!("📤 Export…"))
+                    .on_hover_text(tr!("Save papers with color profiles for another computer (.epmi)"))
                     .clicked()
                 {
                     action = Some(Self::export_media_dialog);
                 }
                 if ui
-                    .button("☁ Neues Papier aus Cloud-Katalog hinzufügen…")
+                    .button(tr!("☁ Add new paper from cloud catalog…"))
                     .clicked()
                 {
                     self.active_view = WorkspaceView::CloudCatalog;
                 }
-                ui.checkbox(&mut self.show_empty_slots, "Freie Plätze anzeigen");
+                ui.checkbox(&mut self.show_empty_slots, tr!("Show free slots"));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.search_filter)
                         .desired_width(180.0)
-                        .hint_text("🔍 Papier suchen…"),
+                        .hint_text(tr!("🔍 Search paper…")),
                 );
             });
         });
@@ -1623,14 +1653,14 @@ impl EpmiGuiApp {
                             .spacing([18.0, 10.0])
                             .show(ui, |ui| {
                                 for hdr in [
-                                    "Platz",
-                                    "Papiername (Drucker-Display)",
-                                    "Basis-Papiertyp",
-                                    "Schwarztinte",
-                                    "Papierdicke",
-                                    "Walzenabstand",
-                                    "Dieser Rechner",
-                                    "Zugeordnetes Farbprofil (ICC)",
+                                    tr!("Slot"),
+                                    tr!("Paper name (printer display)"),
+                                    tr!("Base paper type"),
+                                    tr!("Black ink"),
+                                    tr!("Paper thickness"),
+                                    tr!("Platen gap"),
+                                    tr!("This computer"),
+                                    tr!("Assigned color profile (ICC)"),
                                 ] {
                                     ui.label(RichText::new(hdr).strong().color(t.text_dim));
                                 }
@@ -1660,9 +1690,12 @@ impl EpmiGuiApp {
                                     if ui
                                         .selectable_label(
                                             is_sel,
-                                            RichText::new(format!("Platz {:02}", slot.slot))
-                                                .strong()
-                                                .color(row_col),
+                                            RichText::new(tr!(
+                                                "Slot {slot}",
+                                                slot = format!("{:02}", slot.slot)
+                                            ))
+                                            .strong()
+                                            .color(row_col),
                                         )
                                         .clicked()
                                     {
@@ -1672,7 +1705,7 @@ impl EpmiGuiApp {
                                     let name_display = if is_reg {
                                         format!("● {}", slot.media_name)
                                     } else {
-                                        String::from("○ — Frei —")
+                                        String::from(tr!("○ — free —"))
                                     };
                                     if ui
                                         .selectable_label(
@@ -1691,7 +1724,7 @@ impl EpmiGuiApp {
                                     let base_info = find_base_media_by_sn_id(slot.base_sn_id);
                                     let base_label = if is_reg {
                                         base_info.map_or_else(
-                                            || format!("Code {}", slot.base_sn_id),
+                                            || tr!("Code {code}", code = slot.base_sn_id),
                                             |b| b.name.to_string(),
                                         )
                                     } else {
@@ -1702,9 +1735,9 @@ impl EpmiGuiApp {
                                     if is_reg {
                                         let uses_mk = base_info.is_some_and(|b| b.is_matte);
                                         let (ink_str, ink_c) = if uses_mk {
-                                            ("MK (Matt)", t.warning)
+                                            (tr!("MK (matte)"), t.warning)
                                         } else {
-                                            ("PK (Foto)", t.accent)
+                                            (tr!("PK (photo)"), t.accent)
                                         };
                                         ui.label(RichText::new(ink_str).strong().color(ink_c));
                                     } else {
@@ -1719,9 +1752,9 @@ impl EpmiGuiApp {
                                     ui.label(RichText::new(thick_str).color(t.text_dim));
 
                                     let gap_str = if is_reg {
-                                        platen_gap_label(slot.platen_gap)
+                                        i18n::tr_dyn(platen_gap_label(slot.platen_gap))
                                     } else {
-                                        "—"
+                                        String::from("—")
                                     };
                                     ui.label(RichText::new(gap_str).color(t.text_dim));
 
@@ -1740,7 +1773,10 @@ impl EpmiGuiApp {
                                             SystemState::Changed => t.warning,
                                             SystemState::NotInstalled => t.danger,
                                         };
-                                        ui.label(RichText::new(state.label_de()).color(state_col));
+                                        ui.label(
+                                            RichText::new(i18n::tr_dyn(state.label()))
+                                                .color(state_col),
+                                        );
                                         let (icc_str, icc_col) = match resolve_profile(&entry) {
                                             ProfileSource::Own(p) => (
                                                 p.file_name()
@@ -1748,11 +1784,12 @@ impl EpmiGuiApp {
                                                     .unwrap_or_default(),
                                                 t.text_dim,
                                             ),
-                                            ProfileSource::BaseOnly(n) => {
-                                                (format!("nur Basisprofil ({n})"), t.warning)
-                                            }
+                                            ProfileSource::BaseOnly(n) => (
+                                                tr!("base profile only ({name})", name = n),
+                                                t.warning,
+                                            ),
                                             ProfileSource::Missing(n) => {
-                                                (format!("fehlt: {n}"), t.danger)
+                                                (tr!("missing: {name}", name = n), t.danger)
                                             }
                                         };
                                         ui.label(
@@ -1785,7 +1822,7 @@ impl EpmiGuiApp {
         let t = self.tokens;
         ui.horizontal(|ui| {
             ui.heading(
-                RichText::new("Lokale .emx-Medienpakete öffnen & installieren")
+                RichText::new(tr!("Open & install local .emx media packages"))
                     .strong()
                     .color(t.text),
             );
@@ -1803,15 +1840,15 @@ impl EpmiGuiApp {
             .stroke(Stroke::new(1.0_f32, t.card_border))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Datei (.emx):").color(t.text_dim));
+                    ui.label(RichText::new(tr!("File (.emx):")).color(t.text_dim));
                     ui.add(
                         egui::TextEdit::singleline(&mut self.emx_input_path)
                             .desired_width(420.0)
-                            .hint_text("Pfad zu einer .emx-Datei wählen…"),
+                            .hint_text(tr!("Choose path to an .emx file…")),
                     );
                     if ui
-                        .button("📂 Durchsuchen…")
-                        .on_hover_text("Öffnet den System-Dateidialog zur Auswahl einer .emx-Datei")
+                        .button(tr!("📂 Browse…"))
+                        .on_hover_text(tr!("Opens the system file dialog to choose an .emx file"))
                         .clicked()
                         && let Some(picked) = open_native_emx_file_dialog()
                     {
@@ -1819,31 +1856,37 @@ impl EpmiGuiApp {
                         match parse_emx_file(&picked) {
                             Ok(pkg) => {
                                 self.set_status(
-                                    format!("Medienpaket '{}' geladen.", pkg.media_name),
+                                    tr!("Media package '{name}' loaded.", name = pkg.media_name),
                                     false,
                                 );
                                 self.loaded_emx = Some(pkg);
                             }
                             Err(e) => {
-                                self.set_status(format!("Fehler beim Lesen der .emx: {e}"), true);
+                                self.set_status(
+                                    tr!("Error reading the .emx: {error}", error = e),
+                                    true,
+                                );
                             }
                         }
                     }
 
                     let load_btn =
-                        egui::Button::new(RichText::new("Laden").strong().color(t.accent_text))
+                        egui::Button::new(RichText::new(tr!("Load")).strong().color(t.accent_text))
                             .fill(t.accent);
                     if ui.add(load_btn).clicked() {
                         match parse_emx_file(self.emx_input_path.trim()) {
                             Ok(pkg) => {
                                 self.set_status(
-                                    format!("Medienpaket '{}' geladen.", pkg.media_name),
+                                    tr!("Media package '{name}' loaded.", name = pkg.media_name),
                                     false,
                                 );
                                 self.loaded_emx = Some(pkg);
                             }
                             Err(e) => {
-                                self.set_status(format!("Fehler beim Lesen der .emx: {e}"), true);
+                                self.set_status(
+                                    tr!("Error reading the .emx: {error}", error = e),
+                                    true,
+                                );
                             }
                         }
                     }
@@ -1868,10 +1911,7 @@ impl EpmiGuiApp {
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let install_btn = egui::Button::new(
-                                RichText::new(format!(
-                                    "📲 Direkt auf Platz {:02} installieren",
-                                    target_slot
-                                ))
+                                RichText::new(tr!("📲 Install directly to slot {slot}", slot = format!("{target_slot:02}")))
                                 .strong()
                                 .color(t.accent_text),
                             )
@@ -1881,7 +1921,7 @@ impl EpmiGuiApp {
                             if ui
                                 .add(install_btn)
                                 .on_hover_text(
-                                    "Extrahiert das ICC-Farbprofil, schreibt das Papier in den Drucker-Speicherplatz und aktualisiert CUPS & LumaPrint in einem Schritt",
+                                    tr!("Extracts the ICC color profile and writes the paper into the printer slot in one step"),
                                 )
                                 .clicked()
                             {
@@ -1890,7 +1930,7 @@ impl EpmiGuiApp {
                             }
 
                             if ui
-                                .button(format!("✏ Im Editor öffnen (Platz {:02})", target_slot))
+                                .button(tr!("✏ Open in editor (slot {slot})", slot = format!("{target_slot:02}")))
                                 .clicked()
                             {
                                 self.apply_emx_to_editor(&pkg, target_slot);
@@ -1907,35 +1947,35 @@ impl EpmiGuiApp {
                         .num_columns(2)
                         .spacing([24.0, 10.0])
                         .show(ui, |ui| {
-                            ui.label(RichText::new("Hersteller:").color(t.text_dim));
+                            ui.label(RichText::new(tr!("Manufacturer:")).color(t.text_dim));
                             ui.label(RichText::new(&pkg.vendor).strong());
                             ui.end_row();
 
-                            ui.label(RichText::new("Druckermodell:").color(t.text_dim));
+                            ui.label(RichText::new(tr!("Printer model:")).color(t.text_dim));
                             ui.label(format!("{} ({})", pkg.model_name, pkg.series_name));
                             ui.end_row();
 
-                            ui.label(RichText::new("Basis-Papiertyp:").color(t.text_dim));
+                            ui.label(RichText::new(tr!("Base paper type:")).color(t.text_dim));
                             let base_lbl = find_base_media_by_sn_id(pkg.base_sn_id).map_or_else(
-                                || format!("Code {}", pkg.base_sn_id),
+                                || tr!("Code {code}", code = pkg.base_sn_id),
                                 |b| b.name.to_string(),
                             );
                             ui.label(RichText::new(base_lbl).strong());
                             ui.end_row();
 
-                            ui.label(RichText::new("Papierdicke:").color(t.text_dim));
+                            ui.label(RichText::new(tr!("Paper thickness:")).color(t.text_dim));
                             ui.label(format!("{:.2} mm", pkg.thickness_mm()));
                             ui.end_row();
 
-                            ui.label(RichText::new("Walzenabstand:").color(t.text_dim));
-                            ui.label(platen_gap_label(pkg.platen_gap));
+                            ui.label(RichText::new(tr!("Platen gap:")).color(t.text_dim));
+                            ui.label(i18n::tr_dyn(platen_gap_label(pkg.platen_gap)));
                             ui.end_row();
 
-                            ui.label(RichText::new("Tintenauftrag:").color(t.text_dim));
+                            ui.label(RichText::new(tr!("Ink density:")).color(t.text_dim));
                             ui.label(format!("{:+} %", pkg.print_duty()));
                             ui.end_row();
 
-                            ui.label(RichText::new("Enthaltenes ICC-Farbprofil:").color(t.text_dim));
+                            ui.label(RichText::new(tr!("Included ICC color profile:")).color(t.text_dim));
                             let icc_info = if !pkg.icc_profile_name.is_empty() {
                                 format!(
                                     "{} ({:.1} KB)",
@@ -1943,7 +1983,7 @@ impl EpmiGuiApp {
                                     pkg.icc_profile_bytes.len() as f64 / 1024.0
                                 )
                             } else {
-                                String::from("Kein eigenes ICC-Profil im Paket enthalten")
+                                String::from(tr!("No own ICC profile in the package"))
                             };
                             ui.label(RichText::new(icc_info).monospace().color(t.success));
                             ui.end_row();
@@ -1958,13 +1998,13 @@ impl EpmiGuiApp {
         // Top Bar Row 1: Model selector & Fetch Button
         ui.horizontal(|ui| {
             ui.heading(
-                RichText::new("Online-Medienkatalog für Epson SureColor")
+                RichText::new(tr!("Online media catalog for Epson SureColor"))
                     .strong()
                     .color(t.text),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let fetch_btn = egui::Button::new(
-                    RichText::new("☁ Katalog abrufen")
+                    RichText::new(tr!("☁ Fetch catalog"))
                         .strong()
                         .color(t.accent_text),
                 )
@@ -1981,17 +2021,13 @@ impl EpmiGuiApp {
                         Ok(items) => {
                             let custom_count = items.iter().filter(|r| r.is_custom_emx()).count();
                             self.set_status(
-                                format!(
-                                    "{} Medienprofile ({custom_count} Zusatz-Medien + {} Standard-Medien) für {selected_label} geladen.",
-                                    items.len(),
-                                    items.len().saturating_sub(custom_count),
-                                ),
+                                tr!("{count} media profiles ({custom} add-on media + {standard} standard media) loaded for {model}.", count = items.len(), custom = custom_count, standard = items.len().saturating_sub(custom_count), model = selected_label),
                                 false,
                             );
                             self.cloud_items = items;
                         }
                         Err(e) => {
-                            self.set_status(format!("Cloud-Abruf fehlgeschlagen: {e}"), true);
+                            self.set_status(tr!("Cloud request failed: {error}", error = e), true);
                         }
                     }
                 }
@@ -2029,7 +2065,7 @@ impl EpmiGuiApp {
                         }
                     });
 
-                ui.label(RichText::new("Druckermodell:").color(t.text_dim));
+                ui.label(RichText::new(tr!("Printer model:")).color(t.text_dim));
             });
         });
 
@@ -2040,11 +2076,11 @@ impl EpmiGuiApp {
             ui.add(
                 egui::TextEdit::singleline(&mut self.search_filter)
                     .desired_width(240.0)
-                    .hint_text("🔍 Hersteller oder Papiername filtern…"),
+                    .hint_text(tr!("🔍 Filter manufacturer or paper name…")),
             );
             ui.checkbox(
                 &mut self.cloud_only_custom_emx,
-                "Nur Zusatz-/Drittanbieter-Papiere zeigen",
+                tr!("Show only add-on / third-party papers"),
             );
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2068,7 +2104,7 @@ impl EpmiGuiApp {
                 if self.cloud_items.is_empty() {
                     ui.label(
                         RichText::new(
-                            "Noch keine Katalogdaten geladen. Wähle oben rechts das gewünschte SureColor-Modell und klicke auf '☁ Katalog abrufen'.",
+                            tr!("No catalog data loaded yet. Choose the SureColor model at the top right and click '☁ Fetch catalog'."),
                         )
                         .color(t.text_dim),
                     );
@@ -2084,12 +2120,12 @@ impl EpmiGuiApp {
                             .spacing([16.0, 10.0])
                             .show(ui, |ui| {
                                 for hdr in [
-                                    "Hersteller",
-                                    "Papiername",
-                                    "Kategorie",
-                                    "Paket-Typ",
-                                    "Stand",
-                                    "Installation",
+                                    tr!("Manufacturer"),
+                                    tr!("Paper name"),
+                                    tr!("Category"),
+                                    tr!("Package type"),
+                                    tr!("Date"),
+                                    tr!("Installation"),
                                 ] {
                                     ui.label(RichText::new(hdr).strong().color(t.text_dim));
                                 }
@@ -2123,9 +2159,9 @@ impl EpmiGuiApp {
                                         RichText::new(&item.media_group_name).color(t.text_dim),
                                     );
                                     let (kind_lbl, kind_col) = if item.is_custom_emx() {
-                                        ("Zusatz-Profil (.emx)", t.success)
+                                        (tr!("Add-on profile (.emx)"), t.success)
                                     } else {
-                                        ("Standard-Profil (.emx)", t.text_dim)
+                                        (tr!("Standard profile (.emx)"), t.text_dim)
                                     };
                                     ui.label(RichText::new(kind_lbl).small().color(kind_col));
                                     ui.label(
@@ -2139,10 +2175,7 @@ impl EpmiGuiApp {
                                     if item.has_downloadable_emx() {
                                         ui.horizontal(|ui| {
                                             let inst_btn = egui::Button::new(
-                                                RichText::new(format!(
-                                                    "📲 Auf Platz {:02} installieren",
-                                                    target_slot
-                                                ))
+                                                RichText::new(tr!("📲 Install to slot {slot}", slot = format!("{target_slot:02}")))
                                                 .strong()
                                                 .color(t.accent_text),
                                             )
@@ -2150,7 +2183,7 @@ impl EpmiGuiApp {
                                             if ui
                                                 .add(inst_btn)
                                                 .on_hover_text(
-                                                    "Lädt das Paket herunter, installiert das ICC-Farbprofil, überträgt es in den Drucker-Speicherplatz und aktualisiert CUPS & LumaPrint",
+                                                    tr!("Downloads the package, extracts the ICC color profile and writes the paper into the printer slot"),
                                                 )
                                                 .clicked()
                                             {
@@ -2158,14 +2191,14 @@ impl EpmiGuiApp {
                                             }
                                             if ui
                                                 .button("✏")
-                                                .on_hover_text("Nur in den rechten Editor laden, ohne sofort in den Drucker zu schreiben")
+                                                .on_hover_text(tr!("Only load into the editor on the right, without writing to the printer"))
                                                 .clicked()
                                             {
                                                 edit_only_item = Some(item.clone());
                                             }
                                         });
                                     } else {
-                                        ui.label(RichText::new("Nicht verfügbar").color(t.text_faint));
+                                        ui.label(RichText::new(tr!("Not available")).color(t.text_faint));
                                     }
                                     ui.end_row();
                                 }
@@ -2180,7 +2213,7 @@ impl EpmiGuiApp {
                     self.install_emx_one_click(&path, target_slot);
                 }
                 Err(e) => {
-                    self.set_status(format!("Download fehlgeschlagen: {e}"), true);
+                    self.set_status(tr!("Download failed: {error}", error = e), true);
                 }
             }
         } else if let Some(item) = edit_only_item {
@@ -2192,7 +2225,7 @@ impl EpmiGuiApp {
                     self.show_right_dock = true;
                 }
                 Err(e) => {
-                    self.set_status(format!("Download/Entpacken fehlgeschlagen: {e}"), true);
+                    self.set_status(tr!("Download/extraction failed: {error}", error = e), true);
                 }
             }
         }
@@ -2206,7 +2239,7 @@ impl EpmiGuiApp {
         let mut open = self.show_about_modal;
         let mut close_clicked = false;
 
-        egui::Window::new("Über epmi (ep-media-installer)")
+        egui::Window::new(tr!("About epmi (ep-media-installer)"))
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -2215,12 +2248,12 @@ impl EpmiGuiApp {
             .show(ctx, |ui| {
                 ui.add_space(4.0);
                 ui.heading(
-                    RichText::new("epmi — Media Management für Epson SureColor Drucker")
+                    RichText::new(tr!("epmi — media management for Epson SureColor printers"))
                         .strong()
                         .color(t.accent),
                 );
                 ui.label(
-                    RichText::new(format!("Version {}", env!("CARGO_PKG_VERSION")))
+                    RichText::new(tr!("Version {version}", version = env!("CARGO_PKG_VERSION")))
                         .small()
                         .color(t.text_dim),
                 );
@@ -2247,9 +2280,9 @@ impl EpmiGuiApp {
                 ui.add_space(6.0);
 
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("📖 Handbuch:").strong().color(t.text_dim));
+                    ui.label(RichText::new(tr!("📖 Manual:")).strong().color(t.text_dim));
                     ui.label(
-                        RichText::new("Handbuch-Link folgt in einer kommenden Version")
+                        RichText::new(tr!("Link to the manual follows in a later version"))
                             .italics()
                             .color(t.text_faint),
                     );
@@ -2258,7 +2291,7 @@ impl EpmiGuiApp {
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(
-                        "Hinweis: Unabhängiges Open-Source-Werkzeug, steht in keiner Verbindung zur Seiko Epson Corp.",
+                        tr!("Note: independent open-source tool, not affiliated with Seiko Epson Corp."),
                     )
                     .small()
                     .color(t.text_faint),
@@ -2266,7 +2299,7 @@ impl EpmiGuiApp {
 
                 ui.add_space(10.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Schließen").clicked() {
+                    if ui.button(tr!("Close")).clicked() {
                         close_clicked = true;
                     }
                 });
@@ -2297,6 +2330,7 @@ impl eframe::App for EpmiGuiApp {
 }
 
 fn main() -> eframe::Result {
+    i18n::set_language(i18n::Language::from_env());
     let mut host: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -2309,7 +2343,7 @@ fn main() -> eframe::Result {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("epmi — Media Installer für Epson SureColor")
+            .with_title(tr!("epmi — Media Installer for Epson SureColor"))
             .with_app_id("epmi-gui")
             .with_inner_size([1380.0, 860.0])
             .with_min_inner_size([1024.0, 640.0]),
@@ -2317,7 +2351,7 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        "epmi — Media Installer für Epson SureColor",
+        tr!("epmi — Media Installer for Epson SureColor"),
         options,
         Box::new(move |cc| Ok(Box::new(EpmiGuiApp::new(cc, host)))),
     )

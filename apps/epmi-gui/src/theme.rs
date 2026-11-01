@@ -63,20 +63,20 @@ impl ThemeKind {
     ];
 
     #[must_use]
-    pub const fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Self::BreezeDark => "KDE Breeze Dark",
             Self::BreezeLight => "KDE Breeze Light",
-            Self::Pro => "Pro Dunkel (Anthrazit)",
-            Self::ProMedium => "Pro Mittelgrau",
-            Self::ProLightGray => "Pro Hellgrau",
-            Self::ProLight => "Pro Hell",
-            Self::Studio => "Studio Dunkel (Schiefer)",
-            Self::StudioLight => "Studio Hell",
-            Self::AdwaitaDark => "GNOME Adwaita Dunkel",
-            Self::Adwaita => "GNOME Adwaita Hell",
-            Self::SolarizedDark => "Solarized Dunkel",
-            Self::Classic => "Klassisch Dunkel",
+            Self::Pro => crate::tr!("Pro Dark (Anthracite)"),
+            Self::ProMedium => crate::tr!("Pro Medium Gray"),
+            Self::ProLightGray => crate::tr!("Pro Light Gray"),
+            Self::ProLight => crate::tr!("Pro Light"),
+            Self::Studio => crate::tr!("Studio Dark (Slate)"),
+            Self::StudioLight => crate::tr!("Studio Light"),
+            Self::AdwaitaDark => crate::tr!("GNOME Adwaita Dark"),
+            Self::Adwaita => crate::tr!("GNOME Adwaita Light"),
+            Self::SolarizedDark => crate::tr!("Solarized Dark"),
+            Self::Classic => crate::tr!("Classic Dark"),
         }
     }
 

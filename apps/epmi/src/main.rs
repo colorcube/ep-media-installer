@@ -35,7 +35,7 @@ SUBCOMMANDS:
       Show each paper: printer slot, installed on this computer?, colour profile.
 
   install-system [--host <IP>] [--printer <CODE|MODEL>] [--icc <SLOT>=<FILE.icc>]... [--no-cloud]
-      „Für das System installieren“: read the printer slots, fetch profiles of Epson cloud media
+      “Install for this computer”: read the printer slots, fetch profiles of Epson cloud media
       automatically, assign own profiles, and install paper list + profiles for all users and the
       CUPS driver (asks for the administrator password via pkexec).
 
@@ -259,7 +259,7 @@ fn run(args: &[String]) -> Result<(), String> {
                     item.icc_profile
                 );
             }
-            println!("Für Druckertreiber und LumaPrint: epmi install-system");
+            println!("For the printer driver and LumaPrint: epmi install-system");
             Ok(())
         }
         "inspect-emx" => {
@@ -353,7 +353,7 @@ fn run(args: &[String]) -> Result<(), String> {
             }
             let s = serde_json::to_string_pretty(&entry).map_err(|e| e.to_string())?;
             println!("{s}");
-            println!("Für Druckertreiber und LumaPrint: epmi install-system");
+            println!("For the printer driver and LumaPrint: epmi install-system");
             Ok(())
         }
         "write-slot" => {
@@ -504,7 +504,7 @@ fn run(args: &[String]) -> Result<(), String> {
             if do_sync {
                 let _ = sync_printer_slots_to_json(&client, None).map_err(|e| e.to_string())?;
             }
-            println!("Für Druckertreiber und LumaPrint: epmi install-system");
+            println!("For the printer driver and LumaPrint: epmi install-system");
             Ok(())
         }
         "clear-slot" => {
@@ -543,7 +543,7 @@ fn run(args: &[String]) -> Result<(), String> {
             if do_sync {
                 let _ = sync_printer_slots_to_json(&client, None).map_err(|e| e.to_string())?;
             }
-            println!("Für Druckertreiber und LumaPrint: epmi install-system");
+            println!("For the printer driver and LumaPrint: epmi install-system");
             Ok(())
         }
         "cloud-list" => {
@@ -719,7 +719,7 @@ fn run(args: &[String]) -> Result<(), String> {
             let entries = match read_registered_slots(host) {
                 Ok((slots, _model)) => entries_for_slots(&slots, &working),
                 Err(e) => {
-                    eprintln!("Drucker nicht erreichbar ({e}); zeige die Arbeitskopie.");
+                    eprintln!("Printer not reachable ({e}); showing the working copy.");
                     working
                 }
             };
@@ -763,7 +763,7 @@ fn run(args: &[String]) -> Result<(), String> {
                 let entry = entries
                     .iter_mut()
                     .find(|e| e.slot == *slot)
-                    .ok_or_else(|| format!("Speicherplatz {slot} ist im Drucker nicht belegt"))?;
+                    .ok_or_else(|| format!("Slot {slot} is not occupied in the printer"))?;
                 assign_profile(entry, file).map_err(|e| e.to_string())?;
             }
             if use_cloud {
@@ -776,10 +776,10 @@ fn run(args: &[String]) -> Result<(), String> {
                 {
                     Ok(done) => {
                         for name in done {
-                            println!("Farbprofil aus der Epson-Cloud übernommen: {name}");
+                            println!("Color profile taken over from the Epson cloud: {name}");
                         }
                     }
-                    Err(e) => eprintln!("Epson-Cloud nicht erreichbar ({e}); weiter ohne."),
+                    Err(e) => eprintln!("Epson cloud not reachable ({e}); continuing without."),
                 }
             }
             save_custom_media_json(&default_user_custom_media_json(), &entries)
@@ -820,14 +820,10 @@ fn run(args: &[String]) -> Result<(), String> {
                 .filter(|e| slots.is_empty() || slots.contains(&e.slot))
                 .collect();
             if selected.is_empty() {
-                return Err(String::from("Keine passenden Papiere in der Arbeitskopie"));
+                return Err(String::from("No matching papers in the working copy"));
             }
             export_media(&selected, &out).map_err(|e| e.to_string())?;
-            println!(
-                "{} Papier(e) exportiert nach {}",
-                selected.len(),
-                out.display()
-            );
+            println!("{} paper(s) exported to {}", selected.len(), out.display());
             Ok(())
         }
         "import" => {
@@ -838,7 +834,7 @@ fn run(args: &[String]) -> Result<(), String> {
             merge_imported(&mut working, imported);
             save_custom_media_json(&default_user_custom_media_json(), &working)
                 .map_err(|e| e.to_string())?;
-            println!("{count} Papier(e) importiert. Jetzt: epmi install-system");
+            println!("{count} paper(s) imported. Next: epmi install-system");
             Ok(())
         }
         other => Err(format!("Unknown subcommand '{other}'. Run 'epmi --help'.")),
@@ -886,7 +882,7 @@ fn read_registered_slots(host: Option<String>) -> Result<(Vec<PrinterMediaSlot>,
 fn print_status_table(entries: &[CustomMediaEntry]) {
     let system = load_system_media();
     println!(
-        "Platz  Papier                                     Dieser Rechner                  Farbprofil"
+        "Slot   Paper                                      This computer                   Color profile"
     );
     println!("{}", "-".repeat(118));
     for e in entries {
@@ -895,14 +891,14 @@ fn print_status_table(entries: &[CustomMediaEntry]) {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default(),
-            ProfileSource::BaseOnly(n) => format!("nur Basisprofil ({n})"),
-            ProfileSource::Missing(n) => format!("FEHLT: {n}"),
+            ProfileSource::BaseOnly(n) => format!("base profile only ({n})"),
+            ProfileSource::Missing(n) => format!("MISSING: {n}"),
         };
         println!(
             "{:5}  {:<42} {:<31} {}",
             e.slot,
             e.media_name.chars().take(42).collect::<String>(),
-            system_state(e, &system).label_de(),
+            system_state(e, &system).label(),
             profile
         );
     }

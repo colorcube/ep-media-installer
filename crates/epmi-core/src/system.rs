@@ -1,4 +1,4 @@
-//! System-wide installation of custom media ("Für das System installieren").
+//! System-wide installation of custom media ("Install for this computer").
 //!
 //! Mirrors Epson's Windows/macOS design: the printer's NVRAM slots hold the mechanical settings,
 //! every computer needs the paper list and ICC profiles locally. On Linux the driver package ships a
@@ -91,11 +91,11 @@ pub enum SystemState {
 }
 
 impl SystemState {
-    pub fn label_de(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
-            Self::Installed => "Im System",
-            Self::Changed => "Geändert – erneut installieren",
-            Self::NotInstalled => "Nicht installiert",
+            Self::Installed => "Installed",
+            Self::Changed => "Changed – install again",
+            Self::NotInstalled => "Not installed",
         }
     }
 }
@@ -250,7 +250,7 @@ pub fn stage_media(entries: &[CustomMediaEntry]) -> Result<PathBuf> {
             ProfileSource::Missing(name) => {
                 let _ = fs::remove_dir_all(&dir);
                 return Err(EpmiError::InvalidEmx(format!(
-                    "Farbprofil '{name}' für '{}' nicht gefunden",
+                    "Color profile '{name}' for '{}' not found",
                     e.name
                 )));
             }
@@ -268,7 +268,7 @@ fn run_helper(args: &[&str]) -> Result<String> {
         return Err(EpmiError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!(
-                "{MEDIA_INSTALL_HELPER} fehlt – bitte den Druckertreiber epson-p900-escpr-cups installieren"
+                "{MEDIA_INSTALL_HELPER} is missing – please install the printer driver epson-p900-escpr-cups"
             ),
         )));
     }
@@ -283,7 +283,7 @@ fn run_helper(args: &[&str]) -> Result<String> {
         // pkexec: 126 = authorization dismissed, 127 = not authorized
         Some(126) | Some(127) => Err(EpmiError::Io(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
-            "Anmeldung abgebrochen oder nicht berechtigt",
+            "Authentication cancelled or not authorized",
         ))),
         _ => Err(EpmiError::Io(std::io::Error::other(if stderr.is_empty() {
             stdout
@@ -318,7 +318,7 @@ fn crc32(data: &[u8]) -> u32 {
 
 /// Minimal ZIP writer (stored entries, no compression).
 fn write_zip(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>> {
-    let too_big = || EpmiError::InvalidEmx("Export zu groß".to_string());
+    let too_big = || EpmiError::InvalidEmx("Export too large".to_string());
     let mut out = Vec::new();
     let mut central = Vec::new();
     for (name, data) in files {
@@ -394,9 +394,9 @@ pub fn export_media(entries: &[CustomMediaEntry], path: &Path) -> Result<()> {
 /// into the working copy.
 pub fn import_media(path: &Path) -> Result<Vec<CustomMediaEntry>> {
     let files = extract_zip_entries(&fs::read(path)?)?;
-    let json = files
-        .get("custom_media.json")
-        .ok_or_else(|| EpmiError::InvalidEmx("custom_media.json fehlt im Archiv".to_string()))?;
+    let json = files.get("custom_media.json").ok_or_else(|| {
+        EpmiError::InvalidEmx("custom_media.json missing in the archive".to_string())
+    })?;
     let entries: Vec<CustomMediaEntry> = serde_json::from_slice(json)?;
     let store = user_icc_dir();
     for (name, data) in &files {

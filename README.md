@@ -6,10 +6,11 @@ Native Rust Custom Media & `.emx` Management Tool for **Epson SureColor** Fine A
 
 > [!WARNING]
 > **Beta.** Tested on Fedora with an Epson SureColor **SC-P900**: discovering the printer, reading the
-> 30 custom media slots, the cloud catalog, `.emx` import and „Für das System installieren“ together
+> 30 custom media slots, the cloud catalog, `.emx` import and “Install for this computer” together
 > with [epson-p900-escpr-cups](https://github.com/colorcube/epson-p900-escpr-cups). Writing and clearing
 > slots changes the printer's memory – the other SureColor models are listed from Epson's cloud data but
-> have not been tested. The user interface is currently German only (English is planned).
+> have not been tested. The user interface is available in English and German (follows the system
+> language, switchable under *Settings → Language*).
 
 ---
 
@@ -35,10 +36,10 @@ computer.
 |---|---|---|
 | Mechanical settings, media ID | printer NVRAM slot `1..30` | `epmi` (SNMP) |
 | Working copy (per user) | `~/.config/epson-p900-escpr/custom_media.json`, profiles in `~/.local/share/color/icc/epson-scp900/` | `epmi` |
-| System paper list (CUPS filter, PPD, LumaPrint) | `/etc/epson-p900-escpr-cups/custom_media.json` | driver helper, via **„Für das System installieren“** |
+| System paper list (CUPS filter, PPD, LumaPrint) | `/etc/epson-p900-escpr-cups/custom_media.json` | driver helper, via **“Install for this computer”** |
 | System colour profiles | `/usr/local/share/color/icc/epson-p900-custom/` | driver helper |
 
-**„Für das System installieren“** (GUI button, CLI `epmi install-system`) reads the printer's slots,
+**“Install for this computer”** (GUI button, CLI `epmi install-system`) reads the printer's slots,
 fetches the profiles of Epson cloud media automatically (the slot's media ID equals the cloud
 `.emx` ID), and hands the list to the privileged helper of the driver
 (`pkexec /usr/libexec/epson-p900-escpr-cups/epson-p900-media-install`, administrator password).
@@ -112,13 +113,13 @@ cargo run -p epmi-gui
 ```
 
 - **Automatic Epson Printer Discovery:** Finds Epson printers automatically via installed CUPS queues (`lpstat -v` / PPD) and local network SNMPv1 discovery (`hrDeviceDescr` / IEEE-1284 Device ID), strictly filtering out non-Epson devices. Automatically selects the matching model in the Cloud Catalog and reads all 30 memory slots on startup.
-- **1-Click Installation Workflow:** Choose a target slot (defaults to the next free slot, e.g. `Platz 06`) and click **`📲 Auf Platz XX installieren`** in the Cloud Catalog or Local `.emx` view to extract the `.icc` profile, write the paper into the printer's memory slot, and update the working copy; then **`🖥 Für das System installieren`** makes it available to the CUPS driver and LumaPrint.
+- **1-Click Installation Workflow:** Choose a target slot (defaults to the next free slot, e.g. `Slot 06`) and click **`📲 Install to slot XX`** in the Cloud Catalog or Local `.emx` view to extract the `.icc` profile, write the paper into the printer's memory slot, and update the working copy; then **`🖥 Install for this computer`** makes it available to the CUPS driver and LumaPrint.
 - **All 27 SureColor Models in Cloud Catalog:** Supports the full SureColor SC-P (`SC-P700` to `SC-P20500`) and SC-T (`SC-T3700` to `SC-T7700`) product lines.
 - **LumaPrint / PhotoCraft Desktop UI:**
   - **KDE System Font & Point-Size Detection:** Reads `~/.config/kdeglobals` and loads the system font via `fc-match`.
-  - **Native Wayland Scaling:** Converts typographic points (`72 DPI`) to logical pixels (`96 DPI`, `pt * (96.0 / 72.0)`) with a `90% / 100% / 110% / 125%` UI scale selector in the `Einstellungen` menu (`Ctrl` + `+`/`-` keyboard zooming disabled).
-  - **12 PhotoCraft & KDE Themes:** `KDE Breeze Dark` (default), `KDE Breeze Light`, `Pro Dunkel`, `Pro Mittelgrau`, `Pro Hellgrau`, `Pro Hell`, `Studio Dunkel`, `Studio Hell`, `GNOME Adwaita Dunkel`, `GNOME Adwaita Hell`, `Solarized Dunkel`, `Klassisch Dunkel`.
-  - **User-Friendly Inspector Dock:** Clear German photography terms with a collapsible `5. Technische Details (Expertenansicht)` section for low-level IDs.
+  - **Native Wayland Scaling:** Converts typographic points (`72 DPI`) to logical pixels (`96 DPI`, `pt * (96.0 / 72.0)`) with a `90% / 100% / 110% / 125%` UI scale selector in the `Settings` menu (`Ctrl` + `+`/`-` keyboard zooming disabled).
+  - **12 PhotoCraft & KDE Themes:** `KDE Breeze Dark` (default), `KDE Breeze Light`, `Pro Dark`, `Pro Medium Gray`, `Pro Light Gray`, `Pro Light`, `Studio Dark`, `Studio Light`, `GNOME Adwaita Dark`, `GNOME Adwaita Light`, `Solarized Dark`, `Classic Dark`.
+  - **User-Friendly Inspector Dock:** Clear photography terms (English or German) with a collapsible `5. Technical details (expert view)` section for low-level IDs.
 
 ## Privacy
 

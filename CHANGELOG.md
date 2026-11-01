@@ -12,7 +12,7 @@ First public version.
 - `.emx` packages: inspect, import (ICC profile, mechanical settings, ink density) and write to a slot.
 - Epson cloud catalog for 27 SureColor models: list and download `.emx` packages.
 
-### This computer („Für das System installieren“)
+### This computer (“Install for this computer”)
 - Installs paper list and ICC profiles for all users, the CUPS driver
   [epson-p900-escpr-cups](https://github.com/colorcube/epson-p900-escpr-cups) and
   [LumaPrint](https://github.com/colorcube/lumaprint), via the driver's privileged helper (pkexec).
