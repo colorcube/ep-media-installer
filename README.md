@@ -4,6 +4,13 @@ Native Rust Custom Media & `.emx` Management Tool for **Epson SureColor** Fine A
 
 > **Disclaimer:** `ep-media-installer` (`epmi`) is an independent, clean-room open-source utility and is not affiliated with, endorsed by, or sponsored by Seiko Epson Corporation. Product names are used solely for compatibility reference.
 
+> [!WARNING]
+> **Beta.** Tested on Fedora with an Epson SureColor **SC-P900**: discovering the printer, reading the
+> 30 custom media slots, the cloud catalog, `.emx` import and „Für das System installieren“ together
+> with [epson-p900-escpr-cups](https://github.com/colorcube/epson-p900-escpr-cups). Writing and clearing
+> slots changes the printer's memory – the other SureColor models are listed from Epson's cloud data but
+> have not been tested. The user interface is currently German only (English is planned).
+
 ---
 
 ## Workspace Architecture
@@ -113,9 +120,16 @@ cargo run -p epmi-gui
   - **12 PhotoCraft & KDE Themes:** `KDE Breeze Dark` (default), `KDE Breeze Light`, `Pro Dunkel`, `Pro Mittelgrau`, `Pro Hellgrau`, `Pro Hell`, `Studio Dunkel`, `Studio Hell`, `GNOME Adwaita Dunkel`, `GNOME Adwaita Hell`, `Solarized Dunkel`, `Klassisch Dunkel`.
   - **User-Friendly Inspector Dock:** Clear German photography terms with a collapsible `5. Technische Details (Expertenansicht)` section for low-level IDs.
 
+## Privacy
+
+`epmi` talks to your printer over SNMP (UDP 161) in the local network and, for the cloud catalog and
+automatic profiles, to Epson's media server `https://support.epson.biz/lfp/cms/` (printer series,
+country and language are sent, as Epson's own Media Installer does). Downloaded `.emx` packages are
+cached in `~/.cache/epmi/emx/`. There is no telemetry.
+
 ## About the development
 
-LumaPrint was developed with extensive help from AI. The code, the tests and the documentation were written by Google's Gemini and Anthropic's Claude under my direction. Requirements, design decisions, review and all tests with real hardware are my own.
+ep-media-installer was developed with extensive help from AI. The code, the tests and the documentation were written by Google's Gemini and Anthropic's Claude under my direction. Requirements, design decisions, review and all tests with real hardware are my own.
 
 ## License
 
