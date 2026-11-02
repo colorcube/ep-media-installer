@@ -8,10 +8,6 @@ name: Manual (GitHub Pages)
 on:
   push:
     branches: [main]
-    paths:
-      - "docs/manual/**"
-      - "zensical.toml"
-      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:

@@ -18,7 +18,7 @@ Native Rust Custom Media & `.emx` Management Tool for **Epson SureColor** Fine A
 
 ## Documentation & User Manual
 
-- **[User Manual (English)](docs/manual/en/README.md)** — [Quickstart & 1-Click Workflow](docs/manual/en/1-quickstart-and-workflow.md) · [NVRAM Slots, Cloud Catalog & `.emx` Packages](docs/manual/en/2-printer-slots-and-cloud.md)
+- **[Online User Manual (English)](https://colorcube.github.io/ep-media-installer/manual/)** — [1. Quickstart & 1-Click Workflow](https://colorcube.github.io/ep-media-installer/manual/1-quickstart-and-workflow.html) · [2. NVRAM Slots, Cloud Catalog & `.emx` Packages](https://colorcube.github.io/ep-media-installer/manual/2-printer-slots-and-cloud.html)
 
 ---
 
