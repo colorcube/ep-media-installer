@@ -1,0 +1,55 @@
+# Zensical configuration for the English EP Media Installer manual (`docs/manual/en/`).
+#
+# Local preview:  zensical serve
+# Build static:   zensical build --clean   (output in `site/`)
+
+[project]
+site_name = "EP Media Installer (epmi) Manual"
+site_description = "User manual for EP Media Installer (epmi) — Custom Media & .emx Management for Epson SureColor Printers"
+site_author = "René Fritz"
+site_url = "https://colorcube.github.io/ep-media-installer/"
+repo_url = "https://github.com/colorcube/ep-media-installer"
+repo_name = "colorcube/ep-media-installer"
+docs_dir = "docs/manual/en"
+site_dir = "site"
+use_directory_urls = false
+extra_css = ["stylesheets/extra.css"]
+extra_javascript = ["js/iframe-worker-shim.js"]
+
+nav = [
+    { "Overview" = "README.md" },
+    { "1. Quickstart & Workflow" = "1-quickstart-and-workflow.md" },
+    { "2. Slots, Cloud Catalog & .emx" = "2-printer-slots-and-cloud.md" },
+]
+
+[project.theme]
+variant = "modern"
+language = "en"
+logo = "images/epmi.svg"
+favicon = "images/epmi.svg"
+features = [
+    "navigation.instant",
+    "navigation.tracking",
+    "navigation.sections",
+    "navigation.expand",
+    "navigation.top",
+    "navigation.footer",
+    "search.suggest",
+    "search.highlight",
+    "content.code.copy",
+    "toc.follow",
+]
+
+[[project.theme.palette]]
+scheme = "slate"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+scheme = "default"
+primary = "custom"
+accent = "custom"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"

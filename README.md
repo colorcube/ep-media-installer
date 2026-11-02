@@ -14,6 +14,12 @@ Native Rust Custom Media & `.emx` Management Tool for **Epson SureColor** Fine A
 > have not been tested. The user interface is available in English and German (follows the system
 > language, switchable under *Settings → Language*).
 
+![EP Media Installer – NVRAM Slots & Inspector](docs/manual/en/images/ui_slots_overview.png)
+
+## Documentation & User Manual
+
+- **[User Manual (English)](docs/manual/en/README.md)** — [Quickstart & 1-Click Workflow](docs/manual/en/1-quickstart-and-workflow.md) · [NVRAM Slots, Cloud Catalog & `.emx` Packages](docs/manual/en/2-printer-slots-and-cloud.md)
+
 ---
 
 ## Workspace Architecture

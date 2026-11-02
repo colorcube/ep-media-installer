@@ -182,6 +182,8 @@ pub struct EpmiGuiApp {
     /// Status bar message & state.
     status_msg: String,
     status_is_error: bool,
+    /// Optional automated screenshot generator state `(step_index, frames_in_step)`.
+    screenshot_step: Option<(usize, u8)>,
 }
 
 impl EpmiGuiApp {
@@ -236,6 +238,7 @@ impl EpmiGuiApp {
                 "Searching for Epson printers in CUPS and on the network…"
             )),
             status_is_error: false,
+            screenshot_step: None,
         };
 
         // Pre-populate slots from existing custom_media.json if available
@@ -786,7 +789,8 @@ impl EpmiGuiApp {
 
         egui::ComboBox::from_id_salt(id_salt)
             .selected_text(cur_status)
-            .width(230.0)
+            .width(190.0)
+            .truncate()
             .show_ui(ui, |ui| {
                 for idx in 1..=30_u8 {
                     let s_lbl = self
@@ -1078,7 +1082,7 @@ impl EpmiGuiApp {
                                 t.text
                             }))
                             .fill(if is_active { t.accent } else { t.card })
-                            .min_size(Vec2::new(155.0, 28.0));
+                            .min_size(Vec2::new(135.0, 28.0));
                         if ui.add(btn).clicked() {
                             self.active_view = view;
                         }
@@ -1609,7 +1613,10 @@ impl EpmiGuiApp {
 
         ui.horizontal(|ui| {
             ui.heading(
-                RichText::new(tr!("Slots in the printer (1..30) — {model}", model = self.printer_model_name))
+                RichText::new(tr!(
+                    "Slots in the printer (1..30) — {model}",
+                    model = self.printer_model_name
+                ))
                 .strong()
                 .color(t.text),
             );
@@ -1631,30 +1638,39 @@ impl EpmiGuiApp {
                 }
                 if ui
                     .button(tr!("📥 Import…"))
-                    .on_hover_text(tr!("Take over papers with color profiles from another computer (.epmi)"))
+                    .on_hover_text(tr!(
+                        "Take over papers with color profiles from another computer (.epmi)"
+                    ))
                     .clicked()
                 {
                     action = Some(Self::import_media_dialog);
                 }
                 if ui
                     .button(tr!("📤 Export…"))
-                    .on_hover_text(tr!("Save papers with color profiles for another computer (.epmi)"))
+                    .on_hover_text(tr!(
+                        "Save papers with color profiles for another computer (.epmi)"
+                    ))
                     .clicked()
                 {
                     action = Some(Self::export_media_dialog);
                 }
+            });
+        });
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.search_filter)
+                    .desired_width(220.0)
+                    .hint_text(tr!("🔍 Search paper…")),
+            );
+            ui.checkbox(&mut self.show_empty_slots, tr!("Show free slots"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .button(tr!("☁ Add new paper from cloud catalog…"))
                     .clicked()
                 {
                     self.active_view = WorkspaceView::CloudCatalog;
                 }
-                ui.checkbox(&mut self.show_empty_slots, tr!("Show free slots"));
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.search_filter)
-                        .desired_width(180.0)
-                        .hint_text(tr!("🔍 Search paper…")),
-                );
             });
         });
 
@@ -2357,6 +2373,288 @@ impl EpmiGuiApp {
         }
         self.show_about_modal = open;
     }
+
+    fn configure_demo_for_screenshots(&mut self) {
+        self.discovered_printers = vec![DiscoveredEpsonPrinter {
+            host: String::from("192.0.2.10"),
+            model_name: String::from("EPSON SC-P900 Series"),
+            source: DiscoverySource::CupsAndNetwork(String::from("Epson_SC_P900_ESCPR")),
+            cloud_series_code: Some(String::from("scp9xx")),
+            online: true,
+        }];
+        self.selected_printer_idx = Some(0);
+        self.manual_host_mode = false;
+        self.printer_host = String::from("192.0.2.10");
+        self.printer_model_name = String::from("EPSON SC-P900 Series");
+        self.cloud_model_code = String::from("scp9xx");
+
+        let demo_slots = [
+            (
+                1,
+                "Hahnemuehle Photo Rag 308",
+                917_942_035,
+                25,
+                48,
+                15,
+                0,
+                "Hahnemuehle_PhotoRag308_SC-P900.icc",
+            ),
+            (
+                2,
+                "Canson Platine Fibre Rag 310",
+                915_907_607,
+                174,
+                40,
+                15,
+                0,
+                "Canson_Platine_Fibre_Rag_310.icc",
+            ),
+            (
+                3,
+                "Epson Legacy Baryta II",
+                230_009_156,
+                174,
+                39,
+                15,
+                0,
+                "Epson_SC-P900_700_LegacyBarytaII.icc",
+            ),
+            (
+                4,
+                "Ilford Galerie Gold Fibre Gloss",
+                912_440_118,
+                13,
+                41,
+                15,
+                -5,
+                "Ilford_GoldFibreGloss_P900.icc",
+            ),
+        ];
+
+        for (slot_no, name, mid, sn_id, thick, gap, _duty, _icc) in demo_slots {
+            if let Some(s) = self.slots.get_mut(usize::from(slot_no - 1)) {
+                s.registered = true;
+                s.media_name = String::from(name);
+                s.user_media_id = mid;
+                s.base_sn_id = sn_id;
+                s.media_category = 1;
+                s.thickness_01mm = thick;
+                s.platen_gap = gap;
+            }
+        }
+        let demo_json = std::env::temp_dir().join("epmi_demo_custom_media.json");
+        let mut entries = entries_for_slots(&self.slots, &[]);
+        for (slot_no, _name, _mid, _sn_id, _thick, _gap, duty, icc) in demo_slots {
+            if let Some(e) = entries.iter_mut().find(|e| e.slot == slot_no) {
+                e.print_duty = duty;
+                e.icc_profile = String::from(icc);
+            }
+        }
+        let _ = save_custom_media_json(&demo_json, &entries);
+        self.custom_media_json_path = demo_json;
+        self.select_slot(1);
+        self.editor_print_duty = 0;
+        self.editor_icc_profile = String::from("Hahnemuehle_PhotoRag308_SC-P900.icc");
+        self.install_target_slot = 5;
+
+        self.cloud_items = vec![
+            CloudMediaRecord {
+                id: String::from("1"),
+                region_key: String::from("eu"),
+                media_manufacturer_id: String::from("1"),
+                media_manufacturer_name: String::from("EPSON"),
+                media_type_id: String::from("230009156"),
+                media_type_name: String::from("Legacy Baryta II"),
+                media_group_id: String::from("2"),
+                media_group_name: String::from("Photo Paper"),
+                media_shape_id: String::from("1"),
+                emx_id: String::from("230009156"),
+                version: String::from("1.00"),
+                revision: String::from("1"),
+                updated: String::from("2025-06-15"),
+                url: String::from("https://support.epson.biz/lfp/cms/emx/230009156.emx"),
+                file_name: String::from("Epson_SC-P900_LegacyBarytaII.emx"),
+                size: 1_842_112,
+            },
+            CloudMediaRecord {
+                id: String::from("2"),
+                region_key: String::from("eu"),
+                media_manufacturer_id: String::from("1"),
+                media_manufacturer_name: String::from("EPSON"),
+                media_type_id: String::from("230008412"),
+                media_type_name: String::from("Legacy Platine"),
+                media_group_id: String::from("3"),
+                media_group_name: String::from("Fine Art Paper"),
+                media_shape_id: String::from("1"),
+                emx_id: String::from("230008412"),
+                version: String::from("1.00"),
+                revision: String::from("1"),
+                updated: String::from("2025-06-15"),
+                url: String::from("https://support.epson.biz/lfp/cms/emx/230008412.emx"),
+                file_name: String::from("Epson_SC-P900_LegacyPlatine.emx"),
+                size: 1_904_512,
+            },
+            CloudMediaRecord {
+                id: String::from("3"),
+                region_key: String::from("eu"),
+                media_manufacturer_id: String::from("1"),
+                media_manufacturer_name: String::from("EPSON"),
+                media_type_id: String::from("230008413"),
+                media_type_name: String::from("Legacy Etching"),
+                media_group_id: String::from("3"),
+                media_group_name: String::from("Fine Art Paper"),
+                media_shape_id: String::from("1"),
+                emx_id: String::from("230008413"),
+                version: String::from("1.00"),
+                revision: String::from("1"),
+                updated: String::from("2025-06-15"),
+                url: String::from("https://support.epson.biz/lfp/cms/emx/230008413.emx"),
+                file_name: String::from("Epson_SC-P900_LegacyEtching.emx"),
+                size: 1_876_224,
+            },
+            CloudMediaRecord {
+                id: String::from("4"),
+                region_key: String::from("eu"),
+                media_manufacturer_id: String::from("1"),
+                media_manufacturer_name: String::from("EPSON"),
+                media_type_id: String::from("230008414"),
+                media_type_name: String::from("Legacy Textured"),
+                media_group_id: String::from("3"),
+                media_group_name: String::from("Fine Art Paper"),
+                media_shape_id: String::from("1"),
+                emx_id: String::from("230008414"),
+                version: String::from("1.00"),
+                revision: String::from("1"),
+                updated: String::from("2025-06-15"),
+                url: String::from("https://support.epson.biz/lfp/cms/emx/230008414.emx"),
+                file_name: String::from("Epson_SC-P900_LegacyTextured.emx"),
+                size: 1_891_040,
+            },
+            CloudMediaRecord {
+                id: String::from("5"),
+                region_key: String::from("eu"),
+                media_manufacturer_id: String::from("1"),
+                media_manufacturer_name: String::from("EPSON"),
+                media_type_id: String::from("25"),
+                media_type_name: String::from("Velvet Fine Art Paper"),
+                media_group_id: String::from("3"),
+                media_group_name: String::from("Fine Art Paper"),
+                media_shape_id: String::from("1"),
+                emx_id: String::new(),
+                version: String::from("1.00"),
+                revision: String::from("1"),
+                updated: String::from("2025-01-10"),
+                url: String::new(),
+                file_name: String::new(),
+                size: 0,
+            },
+        ];
+
+        self.emx_input_path = String::from("/home/user/Downloads/Epson_SC-P900_LegacyBarytaII.emx");
+        self.loaded_emx = Some(EmxPackage {
+            source_path: self.emx_input_path.clone(),
+            model_name: String::from("SC-P900 Series"),
+            series_name: String::from("SureColor P900"),
+            user_media_id: 230_009_156,
+            vendor: String::from("EPSON"),
+            media_name: String::from("Legacy Baryta II"),
+            media_full_name: String::from("Epson Legacy Baryta II 314g/m²"),
+            base_sn_id: 174,
+            mac_ppd_id: 174,
+            win_drv_id: 174,
+            media_category: 1,
+            platen_gap: 15,
+            thickness_01mm: 39,
+            drying_time: 0,
+            paper_width_check: 1,
+            cut_sheet_feed_offset: 0,
+            roll_paper_feed_offset: 0,
+            ink_density: 0,
+            icc_profile_name: String::from("Epson_SC-P900_700_LegacyBarytaII.icc"),
+            icc_profile_bytes: vec![0_u8; 1_840_128],
+        });
+
+        self.status_msg = String::from(
+            "Connected to EPSON SC-P900 Series (192.0.2.10) — 4 of 30 NVRAM slots occupied.",
+        );
+        self.status_is_error = false;
+        self.screenshot_step = Some((0, 0));
+    }
+
+    fn handle_screenshot_step(&mut self, ctx: &Context) {
+        let Some((step, frames)) = self.screenshot_step else {
+            return;
+        };
+
+        let captured_img = ctx.input(|i| {
+            i.raw.events.iter().find_map(|ev| {
+                if let egui::Event::Screenshot { image, .. } = ev {
+                    Some(std::sync::Arc::clone(image))
+                } else {
+                    None
+                }
+            })
+        });
+
+        let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/manual/en/images");
+        let _ = std::fs::create_dir_all(&out_dir);
+
+        if let Some(img) = captured_img {
+            let fname = match step {
+                0 => "ui_slots_overview.png",
+                1 => "ui_cloud_catalog.png",
+                _ => "ui_local_emx.png",
+            };
+            let out_path = out_dir.join(fname);
+            save_color_image_png(&out_path, &img);
+            let next_step = step + 1;
+            if next_step >= 3 {
+                self.screenshot_step = None;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                return;
+            }
+            match next_step {
+                1 => {
+                    self.active_view = WorkspaceView::CloudCatalog;
+                    self.status_msg = String::from(
+                        "Cloud Catalog: 5 media records loaded for SureColor SC-P900 (scp9xx).",
+                    );
+                }
+                _ => {
+                    self.active_view = WorkspaceView::EmxPackages;
+                    self.status_msg = String::from(
+                        "Loaded package: Epson_SC-P900_LegacyBarytaII.emx (ICC profile: 1840 KB).",
+                    );
+                }
+            }
+            self.screenshot_step = Some((next_step, 0));
+            ctx.request_repaint();
+            return;
+        }
+
+        if frames < 5 {
+            self.screenshot_step = Some((step, frames + 1));
+            ctx.request_repaint();
+        } else if frames == 5 {
+            self.screenshot_step = Some((step, frames + 1));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
+            ctx.request_repaint();
+        }
+    }
+}
+
+fn save_color_image_png(path: &std::path::Path, img: &egui::ColorImage) {
+    if let Ok(file) = std::fs::File::create(path) {
+        let w = std::io::BufWriter::new(file);
+        let width = u32::try_from(img.width()).unwrap_or(1);
+        let height = u32::try_from(img.height()).unwrap_or(1);
+        let mut encoder = png::Encoder::new(w, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        if let Ok(mut writer) = encoder.write_header() {
+            let _ = writer.write_image_data(img.as_raw());
+        }
+    }
 }
 
 impl eframe::App for EpmiGuiApp {
@@ -2373,18 +2671,23 @@ impl eframe::App for EpmiGuiApp {
         self.draw_right_inspector_dock(ctx);
         self.draw_central_workspace(ctx);
         self.draw_about_modal(ctx);
+        self.handle_screenshot_step(ctx);
     }
 }
 
 fn main() -> eframe::Result {
     i18n::set_language(i18n::Language::from_env());
     let mut host: Option<String> = None;
+    let mut generate_screenshots = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--host"
             && let Some(h) = args.next()
         {
             host = Some(h);
+        } else if arg == "--generate-screenshots" {
+            generate_screenshots = true;
+            i18n::set_language(i18n::Language::English);
         }
     }
 
@@ -2393,15 +2696,21 @@ fn main() -> eframe::Result {
             .with_title(tr!("epmi — Media Installer for Epson SureColor"))
             .with_app_id("de.colorcube.epmi")
             .with_icon(app_icon_data())
-            .with_inner_size([1380.0, 860.0])
-            .with_min_inner_size([1024.0, 640.0]),
+            .with_inner_size([1520.0, 880.0])
+            .with_min_inner_size([1100.0, 680.0]),
         ..Default::default()
     };
 
     eframe::run_native(
         tr!("epmi — Media Installer for Epson SureColor"),
         options,
-        Box::new(move |cc| Ok(Box::new(EpmiGuiApp::new(cc, host)))),
+        Box::new(move |cc| {
+            let mut app = EpmiGuiApp::new(cc, host);
+            if generate_screenshots {
+                app.configure_demo_for_screenshots();
+            }
+            Ok(Box::new(app))
+        }),
     )
 }
 

@@ -1,0 +1,53 @@
+# Builds the Zensical user manual from `docs/manual/en/` and deploys it to GitHub Pages.
+#
+# One-time setup in the GitHub repository:
+#   Settings -> Pages -> Build and deployment -> Source: "GitHub Actions"
+
+name: Manual (GitHub Pages)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/manual/**"
+      - "zensical.toml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Zensical
+        run: pip install zensical
+
+      - name: Build English manual (root)
+        run: zensical build --clean -f zensical.toml
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
