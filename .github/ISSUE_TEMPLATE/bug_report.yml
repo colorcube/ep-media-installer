@@ -1,0 +1,48 @@
+name: Bug Report
+description: Report an issue with SNMP discovery, NVRAM slots, .emx import, cloud catalog, or epmi-gui
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! Please fill in the details below so we can reproduce and diagnose the problem.
+  - type: input
+    id: printer_model
+    attributes:
+      label: Printer Model
+      description: "e.g. Epson SureColor SC-P900, SC-P700, SC-P5300"
+      placeholder: "Epson SureColor SC-P900"
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Linux Distribution & Desktop Environment
+      description: "e.g. Fedora 44 (KDE Plasma 6, Wayland), Debian 13, Ubuntu 24.04, Arch Linux"
+      placeholder: "Fedora 44 (KDE Plasma 6, Wayland)"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: epmi Version & Companion Driver Version
+      description: "Version or git commit of `ep-media-installer` and (if applicable) `epson-p900-escpr-cups`"
+      placeholder: "epmi 0.1.0, epson-p900-escpr-cups 0.3.0"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: "Describe the command or GUI action you ran, what you expected, and what actually happened."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Terminal Output / Error Message
+      description: "Paste any CLI output (`epmi discover`, `epmi list-slots`, `epmi status`) or error messages (please redact personal IP/serial numbers if desired):"
+      render: shell
+    validations:
+      required: false

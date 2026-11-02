@@ -20,6 +20,8 @@ First public version.
 - Own profiles can be assigned per paper; export/import with profiles (`.epmi`) for other computers.
 - Status per paper: installed / changed / not installed, own profile / base profile only / missing.
 
-### Interfaces
+### Interfaces & desktop integration
 - CLI `epmi` (`discover`, `list-slots`, `status`, `install-system`, `export`, `import`, `import-emx`,
   `write-slot`, `clear-slot`, `cloud-list`, `cloud-download`, …) and desktop GUI `epmi-gui`.
+- Bilingual user interface in `epmi-gui` (English by default, German according to system language or switchable under Settings → Language).
+- Application icon, Wayland/X11 desktop entry (`share/applications/de.colorcube.epmi.desktop`, *EP Media Installer (epmi)*), AppStream metainfo (`share/metainfo/de.colorcube.epmi.metainfo.xml`), and `./bin/install-desktop` (`--uninstall`) installer.
