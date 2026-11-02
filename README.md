@@ -49,8 +49,24 @@ The helper installs list and profiles and refreshes the PPDs of all CUPS queues 
 Requires [`epson-p900-escpr-cups`](https://github.com/colorcube/epson-p900-escpr-cups) to be installed.
 
 Papers that are not in the Epson cloud (e.g. third-party papers) get their profile assigned once
-(GUI: 📂 next to *Farbprofil*, CLI: `--icc <SLOT>=<FILE.icc>`). To set up a second computer,
+(GUI: 📂 next to *Color profile* / *Farbprofil*, CLI: `--icc <SLOT>=<FILE.icc>`). To set up a second computer,
 export them (`.epmi` archive with profiles) and import them there.
+
+| Project | Version | Compatible With | Role |
+| :--- | :--- | :--- | :--- |
+| **`ep-media-installer` (`epmi`)** | `0.1.x` | `epson-p900-escpr-cups >= 0.3.0`<br>`LumaPrint >= 0.1.0` | Reads/writes the 30 NVRAM slots via SNMP, imports `.emx` / cloud media, and installs papers + ICC profiles system-wide |
+| **[`epson-p900-escpr-cups`](https://github.com/colorcube/epson-p900-escpr-cups)** | `0.3.x` | `ep-media-installer >= 0.1.0`<br>`LumaPrint >= 0.1.0` | Native Rust CUPS filter (`rastertop900escpr`), dynamic PPD generator, and privileged helper `epson-p900-media-install` |
+| **[`LumaPrint`](https://github.com/colorcube/lumaprint)** | `0.1.x` | `epson-p900-escpr-cups >= 0.3.0`<br>`ep-media-installer >= 0.1.0`<br>Any CUPS queue | 16-bit Fine-Art print layout, live softproofing, and Advanced B&W studio; automatically loads installed custom media |
+
+---
+
+## Supported Systems & Requirements
+
+- **Distributions:** Developed and tested on Fedora 43/44 (KDE Plasma 6); works on Debian 13+, Ubuntu 24.04+, Arch Linux, openSUSE Tumbleweed, and other modern Linux distributions.
+- **Display Server (`epmi-gui`):** **Wayland** and **X11** (`eframe`/`winit` with OpenGL/Mesa). The `epmi` CLI runs headless without a display server.
+- **CUPS & Polkit:** CUPS `>= 2.3` (`lpstat` for automatic queue discovery) and `polkit` (`pkexec` + a running desktop polkit authentication agent for *“Install for this computer”*).
+- **Network:** Local network reachability to the printer via **SNMPv1 (`UDP 161`)** for reading/writing the 30 NVRAM slots, and HTTPS (`TCP 443`) for browsing/downloading from the Epson cloud media catalog.
+- **Rust Toolchain (for building from source):** `>= 1.85` (Rust 2024 Edition).
 
 ---
 
@@ -128,6 +144,20 @@ cargo run -p epmi-gui
   - **Native Wayland Scaling:** Converts typographic points (`72 DPI`) to logical pixels (`96 DPI`, `pt * (96.0 / 72.0)`) with a `90% / 100% / 110% / 125%` UI scale selector in the `Settings` menu (`Ctrl` + `+`/`-` keyboard zooming disabled).
   - **12 PhotoCraft & KDE Themes:** `KDE Breeze Dark` (default), `KDE Breeze Light`, `Pro Dark`, `Pro Medium Gray`, `Pro Light Gray`, `Pro Light`, `Studio Dark`, `Studio Light`, `GNOME Adwaita Dark`, `GNOME Adwaita Light`, `Solarized Dark`, `Classic Dark`.
   - **User-Friendly Inspector Dock:** Clear photography terms (English or German) with a collapsible `5. Technical details (expert view)` section for low-level IDs.
+
+---
+
+## Troubleshooting
+
+- **Printer is not discovered or NVRAM slots cannot be read via SNMP (`UDP 161`):**
+  - Check that the printer is powered on and reachable in your local network (`epmi list-slots --host <PRINTER_IP>`).
+  - Open the printer's Web Config (`http://<PRINTER_IP>`) and verify that **SNMPv1/v2c** (Community `public`) is enabled under *Network → Network Security / Services → SNMP*.
+  - If you use a VPN or separate VLAN, automatic `/24` broadcast discovery may not reach the printer; pass `--host <PRINTER_IP>` on the CLI or enter the IP address in the top bar of `epmi-gui` and click **`Connect`**.
+- **“Install for this computer” (`pkexec`) fails or shows no password dialog:**
+  - `epmi` runs `pkexec /usr/libexec/epson-p900-escpr-cups/epson-p900-media-install`. Make sure [`epson-p900-escpr-cups`](https://github.com/colorcube/epson-p900-escpr-cups) (`>= 0.3.0`) is installed (`sudo ./install.sh`).
+  - If no graphical password prompt appears (e.g. on minimal window managers like Sway/i3 without a running Polkit agent), start a Polkit authentication agent (`polkit-kde-authentication-agent-1` or `polkit-gnome-authentication-agent-1`) or run `epmi install-system` in a terminal.
+- **SELinux (Fedora / RHEL):**
+  - `epson-p900-media-install` restores SELinux file contexts automatically. To check for any SELinux denials manually, run `sudo ausearch -m avc -ts recent` and `sudo restorecon -RFv /etc/epson-p900-escpr-cups /usr/local/share/color/icc/epson-p900-custom`.
 
 ## Privacy
 
