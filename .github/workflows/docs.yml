@@ -40,8 +40,10 @@ jobs:
       - name: Install Zensical
         run: pip install zensical
 
-      - name: Build English manual (root)
-        run: zensical build --clean -f zensical.toml
+      - name: Build English manual
+        run: |
+          zensical build --clean -f zensical.toml
+          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=manual/"><link rel="canonical" href="manual/"><title>EP Media Installer (epmi)</title><a href="manual/">EP Media Installer (epmi) User Manual</a>\n' > site/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

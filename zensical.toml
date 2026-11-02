@@ -7,11 +7,11 @@
 site_name = "EP Media Installer (epmi) Manual"
 site_description = "User manual for EP Media Installer (epmi) — Custom Media & .emx Management for Epson SureColor Printers"
 site_author = "René Fritz"
-site_url = "https://colorcube.github.io/ep-media-installer/"
+site_url = "https://colorcube.github.io/ep-media-installer/manual/"
 repo_url = "https://github.com/colorcube/ep-media-installer"
 repo_name = "colorcube/ep-media-installer"
 docs_dir = "docs/manual/en"
-site_dir = "site"
+site_dir = "site/manual"
 use_directory_urls = false
 extra_css = ["stylesheets/extra.css"]
 extra_javascript = ["js/iframe-worker-shim.js"]

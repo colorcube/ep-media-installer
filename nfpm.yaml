@@ -1,0 +1,98 @@
+# nfpm configuration for ep-media-installer (.deb & .rpm)
+# Build binaries & manual first:
+#   cargo build --release --workspace --locked
+#   zensical build --clean -f zensical.toml
+# Package:
+#   VERSION=0.1.0 nfpm package --packager deb --target dist/
+#   VERSION=0.1.0 nfpm package --packager rpm --target dist/
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+name: "ep-media-installer"
+arch: "amd64"
+platform: "linux"
+version: "${VERSION}"
+section: "utils"
+priority: "optional"
+maintainer: "René Fritz <rf@colorcube.de>"
+description: |
+  EP Media Installer (epmi & epmi-gui) — Custom Media, SNMP NVRAM Slot (1..30),
+  Cloud Catalog, and .emx Package Manager for Epson SureColor Printers.
+vendor: "colorcube"
+homepage: "https://github.com/colorcube/ep-media-installer"
+license: "GPL-3.0-or-later"
+
+overrides:
+  deb:
+    depends:
+      - libc6
+      - libgl1
+      - libwayland-client0 | libx11-6
+      - libxkbcommon0
+    recommends:
+      - epson-p900-escpr-cups (>= 0.3.0)
+      - cups-client
+      - curl
+      - pkexec | policykit-1
+  rpm:
+    depends:
+      - mesa-libGL
+      - libxkbcommon
+    recommends:
+      - epson-p900-escpr-cups >= 0.3.0
+      - cups-client
+      - curl
+      - polkit
+
+contents:
+  - src: ./target/release/epmi
+    dst: /usr/bin/epmi
+    file_info:
+      mode: 0755
+
+  - src: ./target/release/epmi-gui
+    dst: /usr/bin/epmi-gui
+    file_info:
+      mode: 0755
+
+  - src: ./share/applications/de.colorcube.epmi.desktop
+    dst: /usr/share/applications/de.colorcube.epmi.desktop
+    file_info:
+      mode: 0644
+
+  - src: ./share/metainfo/de.colorcube.epmi.metainfo.xml
+    dst: /usr/share/metainfo/de.colorcube.epmi.metainfo.xml
+    file_info:
+      mode: 0644
+
+  - src: ./share/icons/hicolor/scalable/apps/de.colorcube.epmi.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/de.colorcube.epmi.svg
+    file_info:
+      mode: 0644
+
+  - src: ./share/icons/hicolor/128x128/apps/de.colorcube.epmi.png
+    dst: /usr/share/icons/hicolor/128x128/apps/de.colorcube.epmi.png
+    file_info:
+      mode: 0644
+
+  - src: ./site/manual
+    dst: /usr/share/doc/ep-media-installer/manual
+    type: tree
+
+  - src: ./README.md
+    dst: /usr/share/doc/ep-media-installer/README.md
+    file_info:
+      mode: 0644
+
+  - src: ./CHANGELOG.md
+    dst: /usr/share/doc/ep-media-installer/CHANGELOG.md
+    file_info:
+      mode: 0644
+
+  - src: ./LICENSE
+    dst: /usr/share/doc/ep-media-installer/LICENSE
+    file_info:
+      mode: 0644
+
+scripts:
+  postinstall: ./packaging/postinstall.sh
+  postremove: ./packaging/postinstall.sh

@@ -130,14 +130,18 @@ cargo run -p epmi -- cloud-download 230009156 --import --slot 6 --write-printer
 
 ---
 
-## Desktop GUI (`epmi-gui`)
+## Installation & Desktop GUI (`epmi-gui`)
 
-Run directly from a checkout or install `epmi` and `epmi-gui` into `~/.local/bin` with the desktop entry, AppStream metadata, and icons (`~/.local/share`):
+Install the `.deb` (Debian/Ubuntu) or `.rpm` (Fedora/openSUSE) package from [GitHub Releases](https://github.com/colorcube/ep-media-installer/releases), or build and install from source into `~/.local/bin` with the desktop entry, AppStream metadata, and icons (`~/.local/share`):
 
 ```bash
-cargo run -p epmi-gui
+# Option 1: Install from .rpm or .deb release package (system-wide in /usr/bin + desktop entry + offline manual):
+sudo dnf install ./ep-media-installer-*.x86_64.rpm
+# or on Debian/Ubuntu:
+sudo apt install ./ep-media-installer_*_amd64.deb
 
-# Or install for the current user (appears as "EP Media Installer (epmi)" in the application menu):
+# Option 2: Run or install from a source checkout for the current user:
+cargo run -p epmi-gui
 ./bin/install-desktop              # builds --release and installs into ~/.local/{bin,share}
 ./bin/install-desktop --uninstall  # removes the installed files
 ```

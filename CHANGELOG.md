@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 – unreleased (beta)
+## 0.1.0 – 2026-11-02 (beta)
 
 First public version.
 
@@ -23,5 +23,5 @@ First public version.
 ### Interfaces & desktop integration
 - CLI `epmi` (`discover`, `list-slots`, `status`, `install-system`, `export`, `import`, `import-emx`,
   `write-slot`, `clear-slot`, `cloud-list`, `cloud-download`, …) and desktop GUI `epmi-gui`.
-- Bilingual user interface in `epmi-gui` (English by default, German according to system language or switchable under Settings → Language).
-- Application icon, Wayland/X11 desktop entry (`share/applications/de.colorcube.epmi.desktop`, *EP Media Installer (epmi)*), AppStream metainfo (`share/metainfo/de.colorcube.epmi.metainfo.xml`), and `./bin/install-desktop` (`--uninstall`) installer.
+- Bilingual user interface in `epmi-gui` (English by default, German according to system language or switchable under View → Language), KDE/system theme detection (`View → Theme`), and `F1` User Guide integration (local offline HTML manual with online fallback).
+- `.deb` and `.rpm` package definitions (`nfpm.yaml`, `.github/workflows/release.yml`), application icon, Wayland/X11 desktop entry (`share/applications/de.colorcube.epmi.desktop`, *EP Media Installer (epmi)*), AppStream metainfo (`share/metainfo/de.colorcube.epmi.metainfo.xml`), and `./bin/install-desktop` (`--uninstall`) installer.
