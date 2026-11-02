@@ -23,6 +23,18 @@ impl Language {
         }
     }
 
+    /// Stable code for settings files.
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::English => "en",
+            Self::German => "de",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|l| l.code() == code)
+    }
+
     /// From `LC_ALL` / `LC_MESSAGES` / `LANG`: German for `de*`, otherwise English.
     pub fn from_env() -> Self {
         for var in ["LC_ALL", "LC_MESSAGES", "LANG"] {
@@ -103,33 +115,55 @@ macro_rules! tr {
 mod tests {
     use super::*;
 
+    /// The text of every `tr!("…")` in `src` (escape sequences resolved).
+    fn tr_texts(src: &str) -> Vec<String> {
+        let mut texts = Vec::new();
+        let mut rest = src;
+        while let Some(pos) = rest.find("tr!(") {
+            rest = rest[pos + 4..].trim_start();
+            let Some(after_quote) = rest.strip_prefix('"') else {
+                continue;
+            };
+            rest = after_quote;
+            let mut text = String::new();
+            let mut chars = rest.chars();
+            while let Some(c) = chars.next() {
+                match c {
+                    '"' => break,
+                    '\\' => match chars.next() {
+                        Some('n') => text.push('\n'),
+                        Some('\n') => {
+                            let skipped: String =
+                                chars.clone().take_while(|c| c.is_whitespace()).collect();
+                            for _ in skipped.chars() {
+                                chars.next();
+                            }
+                        }
+                        Some(other) => text.push(other),
+                        None => break,
+                    },
+                    _ => text.push(c),
+                }
+            }
+            texts.push(text);
+        }
+        texts
+    }
+
     /// Every `tr!("…")` text in the GUI sources needs a German translation.
     #[test]
     fn all_ui_texts_are_translated() {
         let sources = [include_str!("main.rs"), include_str!("theme.rs")];
         let mut missing = Vec::new();
         for src in sources {
-            let mut rest = src;
-            while let Some(pos) = rest.find("tr!(\"") {
-                rest = &rest[pos + 5..];
-                let mut text = String::new();
-                let mut chars = rest.chars();
-                while let Some(c) = chars.next() {
-                    match c {
-                        '"' => break,
-                        '\\' => match chars.next() {
-                            Some('n') => text.push('\n'),
-                            Some(other) => text.push(other),
-                            None => break,
-                        },
-                        _ => text.push(c),
-                    }
-                }
+            for text in tr_texts(src) {
                 if !german().contains_key(text.as_str()) {
                     missing.push(text);
                 }
             }
         }
+        missing.sort();
+        missing.dedup();
         assert!(
             missing.is_empty(),
             "missing German translations: {missing:#?}"

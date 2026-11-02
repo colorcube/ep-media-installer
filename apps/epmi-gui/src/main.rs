@@ -30,9 +30,53 @@ use epmi_core::{
     probe_epson_printer_snmp, resolve_profile, sanitize_ppd_media_key, save_custom_media_json,
     system_state,
 };
+use serde::{Deserialize, Serialize};
 use theme::{
     KdeTypography, ThemeKind, Tokens, apply_theme_and_typography, install_kde_system_fonts,
 };
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+struct UiPersistentSettings {
+    #[serde(default)]
+    ui_theme: Option<ThemeKind>,
+    #[serde(default)]
+    ui_scale: Option<f32>,
+    #[serde(default)]
+    language: Option<String>,
+}
+
+fn ui_settings_file_path() -> Option<PathBuf> {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
+        && !xdg.is_empty()
+    {
+        return Some(PathBuf::from(xdg).join("ep-media-installer/ui_settings.json"));
+    }
+    let home = std::env::var("HOME").ok()?;
+    if home.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(home).join(".config/ep-media-installer/ui_settings.json"))
+}
+
+fn load_ui_settings() -> UiPersistentSettings {
+    let Some(path) = ui_settings_file_path() else {
+        return UiPersistentSettings::default();
+    };
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return UiPersistentSettings::default();
+    };
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+fn init_language() {
+    let settings = load_ui_settings();
+    let lang = settings
+        .language
+        .as_deref()
+        .and_then(i18n::Language::from_code)
+        .unwrap_or_else(i18n::Language::from_env);
+    i18n::set_language(lang);
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorkspaceView {
@@ -115,7 +159,7 @@ fn app_icon_data() -> egui::IconData {
 }
 
 pub struct EpmiGuiApp {
-    /// Selected PhotoCraft / KDE theme.
+    /// Selected PhotoCraft / KDE theme (defaults to [`ThemeKind::KdeSystem`]).
     theme_kind: ThemeKind,
     /// Active theme color and radius tokens.
     tokens: Tokens,
@@ -123,6 +167,8 @@ pub struct EpmiGuiApp {
     kde_typography: KdeTypography,
     /// Additional user UI scale multiplier (`0.9` .. `1.25`).
     ui_scale: f32,
+    /// UI language chosen in the settings menu; `None` follows the system locale.
+    language: Option<i18n::Language>,
     /// Show/hide the right-hand paper settings dock.
     show_right_dock: bool,
 
@@ -191,10 +237,16 @@ impl EpmiGuiApp {
         cc.egui_ctx.options_mut(|opt| {
             opt.zoom_with_keyboard = false;
         });
+        let saved_ui = load_ui_settings();
         let kde_typography = install_kde_system_fonts(&cc.egui_ctx);
-        let theme_kind = ThemeKind::BreezeDark;
+        let theme_kind = saved_ui.ui_theme.unwrap_or_default();
         let tokens = theme_kind.tokens();
-        let ui_scale = 1.0_f32;
+        let ui_scale = saved_ui.ui_scale.unwrap_or(1.0_f32).clamp(0.75, 1.75);
+        let language = saved_ui
+            .language
+            .as_deref()
+            .and_then(i18n::Language::from_code);
+        i18n::set_language(language.unwrap_or_else(i18n::Language::from_env));
         apply_theme_and_typography(&cc.egui_ctx, theme_kind, &kde_typography, ui_scale);
 
         let slots: Vec<PrinterMediaSlot> = (1..=30).map(PrinterMediaSlot::empty).collect();
@@ -210,6 +262,7 @@ impl EpmiGuiApp {
             tokens,
             kde_typography,
             ui_scale,
+            language,
             show_right_dock: true,
             active_view: WorkspaceView::PrinterSlots,
             show_empty_slots: true,
@@ -278,6 +331,29 @@ impl EpmiGuiApp {
         app.refresh_printer_discovery(&extra);
 
         app
+    }
+
+    fn set_ui_language(&mut self, language: Option<i18n::Language>) {
+        self.language = language;
+        i18n::set_language(language.unwrap_or_else(i18n::Language::from_env));
+        self.save_ui_settings();
+    }
+
+    fn save_ui_settings(&self) {
+        let Some(path) = ui_settings_file_path() else {
+            return;
+        };
+        let settings = UiPersistentSettings {
+            ui_theme: Some(self.theme_kind),
+            ui_scale: Some(self.ui_scale),
+            language: self.language.map(|l| l.code().to_string()),
+        };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&settings) {
+            let _ = std::fs::write(path, json);
+        }
     }
 
     fn set_status(&mut self, msg: impl Into<String>, is_error: bool) {
@@ -912,57 +988,78 @@ impl EpmiGuiApp {
                     });
 
                     ui.menu_button(tr!("Settings"), |ui| {
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                        ui.spacing_mut().item_spacing = Vec2::new(8.0, 5.0);
+                        ui.menu_button(tr!("Appearance"), |ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(8.0, 5.0);
+                            ui.label(RichText::new(tr!("UI theme")).strong());
+                            for &tk in ThemeKind::ALL {
+                                if ui.radio(self.theme_kind == tk, tk.label()).clicked() {
+                                    self.theme_kind = tk;
+                                    self.tokens = self.theme_kind.tokens();
+                                    self.save_ui_settings();
+                                    ui.close_menu();
+                                }
+                            }
+                            ui.separator();
+                            ui.label(
+                                RichText::new(tr!(
+                                    "Font & scaling (KDE: {font} {size} pt)",
+                                    font = self.kde_typography.family,
+                                    size = format!("{:.0}", self.kde_typography.point_size)
+                                ))
+                                .strong(),
+                            );
+                            for (scale, lbl) in [
+                                (0.90_f32, tr!("90 % (compact)")),
+                                (1.00_f32, tr!("100 % (KDE default)")),
+                                (1.10_f32, tr!("110 % (larger)")),
+                                (1.25_f32, tr!("125 % (large)")),
+                            ] {
+                                if ui
+                                    .radio((self.ui_scale - scale).abs() < 0.02, lbl)
+                                    .clicked()
+                                {
+                                    self.ui_scale = scale;
+                                    self.save_ui_settings();
+                                    ui.close_menu();
+                                }
+                            }
+                        });
+                        ui.menu_button(tr!("Language"), |ui| {
+                            ui.spacing_mut().item_spacing = Vec2::new(8.0, 5.0);
+                            let current = i18n::language();
+                            if ui
+                                .radio(self.language.is_none(), tr!("System default"))
+                                .clicked()
+                            {
+                                self.set_ui_language(None);
+                                ui.close_menu();
+                            }
+                            for lang in i18n::Language::ALL {
+                                if ui
+                                    .radio(self.language.is_some() && current == lang, lang.label())
+                                    .clicked()
+                                {
+                                    self.set_ui_language(Some(lang));
+                                    ui.close_menu();
+                                }
+                            }
+                        });
+                        ui.separator();
                         ui.checkbox(&mut self.show_right_dock, tr!("Show paper settings dock"));
                         ui.checkbox(
                             &mut self.show_empty_slots,
                             tr!("Also show free slots (1..30) in the table"),
                         );
-                        ui.separator();
-                        ui.label(
-                            RichText::new(tr!("Color scheme (PhotoCraft & KDE themes):"))
-                                .strong()
-                                .color(t.text_dim),
-                        );
-                        for &kind in ThemeKind::ALL {
-                            if ui
-                                .radio_value(&mut self.theme_kind, kind, kind.label())
-                                .clicked()
-                            {
-                                self.tokens = self.theme_kind.tokens();
-                            }
-                        }
-                        ui.separator();
-                        ui.label(RichText::new(tr!("UI scale:")).strong().color(t.text_dim));
-                        ui.horizontal(|ui| {
-                            for (scale, lbl) in [
-                                (0.90_f32, "90%"),
-                                (1.00_f32, "100%"),
-                                (1.10_f32, "110%"),
-                                (1.25_f32, "125%"),
-                            ] {
-                                if ui
-                                    .selectable_label((self.ui_scale - scale).abs() < 0.02, lbl)
-                                    .clicked()
-                                {
-                                    self.ui_scale = scale;
-                                }
-                            }
-                        });
-                        ui.separator();
-                        ui.label(RichText::new(tr!("Language:")).strong().color(t.text_dim));
-                        ui.horizontal(|ui| {
-                            for lang in i18n::Language::ALL {
-                                if ui
-                                    .selectable_label(i18n::language() == lang, lang.label())
-                                    .clicked()
-                                {
-                                    i18n::set_language(lang);
-                                }
-                            }
-                        });
                     });
 
                     ui.menu_button(tr!("Help"), |ui| {
+                        if ui.button(tr!("📖 User guide  (F1)")).clicked() {
+                            self.open_user_guide();
+                            ui.close_menu();
+                        }
+                        ui.separator();
                         if ui.button(tr!("ℹ About epmi…")).clicked() {
                             self.show_about_modal = true;
                             ui.close_menu();
@@ -2344,11 +2441,9 @@ impl EpmiGuiApp {
 
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(tr!("📖 Manual:")).strong().color(t.text_dim));
-                    ui.label(
-                        RichText::new(tr!("Link to the manual follows in a later version"))
-                            .italics()
-                            .color(t.text_faint),
-                    );
+                    if ui.button(tr!("📖 Open user guide  (F1)")).clicked() {
+                        self.open_user_guide();
+                    }
                 });
 
                 ui.add_space(8.0);
@@ -2372,6 +2467,24 @@ impl EpmiGuiApp {
             open = false;
         }
         self.show_about_modal = open;
+    }
+
+    fn open_user_guide(&mut self) {
+        let target = resolve_user_guide_target();
+        match std::process::Command::new("xdg-open").arg(&target).spawn() {
+            Ok(_) => {
+                self.set_status(tr!("Opened user guide: {target}", target = target), false);
+            }
+            Err(_) => {
+                self.set_status(
+                    tr!(
+                        "Could not open browser (xdg-open): {target}",
+                        target = target
+                    ),
+                    true,
+                );
+            }
+        }
     }
 
     fn configure_demo_for_screenshots(&mut self) {
@@ -2643,6 +2756,50 @@ impl EpmiGuiApp {
     }
 }
 
+const ONLINE_MANUAL_URL: &str = "https://colorcube.github.io/ep-media-installer/manual/";
+
+/// Resolves the local offline HTML user guide (`index.html`) if found under `roots`,
+/// otherwise falls back to [`ONLINE_MANUAL_URL`].
+fn resolve_user_guide_target_in_roots(roots: &[PathBuf]) -> String {
+    for root in roots {
+        for rel in ["site/manual/index.html", "manual/index.html"] {
+            let candidate = root.join(rel);
+            if candidate.is_file() {
+                let abs = std::fs::canonicalize(&candidate).unwrap_or(candidate);
+                return format!("file://{}", abs.display());
+            }
+        }
+    }
+    String::from(ONLINE_MANUAL_URL)
+}
+
+fn resolve_user_guide_target() -> String {
+    let mut roots = Vec::new();
+    if let Ok(cwd) = std::env::current_dir() {
+        roots.push(cwd);
+    }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(exe_dir) = exe.parent()
+    {
+        roots.push(exe_dir.join("../.."));
+        roots.push(exe_dir.join("../share/doc/ep-media-installer"));
+    }
+    roots.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."));
+    if let Ok(xdg_data) = std::env::var("XDG_DATA_HOME")
+        && !xdg_data.is_empty()
+    {
+        roots.push(PathBuf::from(xdg_data).join("doc/ep-media-installer"));
+    }
+    if let Ok(home) = std::env::var("HOME")
+        && !home.is_empty()
+    {
+        roots.push(PathBuf::from(home).join(".local/share/doc/ep-media-installer"));
+    }
+    roots.push(PathBuf::from("/usr/local/share/doc/ep-media-installer"));
+    roots.push(PathBuf::from("/usr/share/doc/ep-media-installer"));
+    resolve_user_guide_target_in_roots(&roots)
+}
+
 fn save_color_image_png(path: &std::path::Path, img: &egui::ColorImage) {
     if let Ok(file) = std::fs::File::create(path) {
         let w = std::io::BufWriter::new(file);
@@ -2666,6 +2823,12 @@ impl eframe::App for EpmiGuiApp {
         self.tokens = self.theme_kind.tokens();
         apply_theme_and_typography(ctx, self.theme_kind, &self.kde_typography, self.ui_scale);
 
+        if !ctx.wants_keyboard_input()
+            && ctx.input(|i| !i.modifiers.any() && i.key_pressed(egui::Key::F1))
+        {
+            self.open_user_guide();
+        }
+
         self.draw_top_bars(ctx);
         self.draw_bottom_status_bar(ctx);
         self.draw_right_inspector_dock(ctx);
@@ -2676,7 +2839,7 @@ impl eframe::App for EpmiGuiApp {
 }
 
 fn main() -> eframe::Result {
-    i18n::set_language(i18n::Language::from_env());
+    init_language();
     let mut host: Option<String> = None;
     let mut generate_screenshots = false;
     let mut args = std::env::args().skip(1);
@@ -2707,6 +2870,8 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             let mut app = EpmiGuiApp::new(cc, host);
             if generate_screenshots {
+                app.language = Some(i18n::Language::English);
+                i18n::set_language(i18n::Language::English);
                 app.configure_demo_for_screenshots();
             }
             Ok(Box::new(app))
@@ -2716,9 +2881,31 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
-    use super::app_icon_data;
+    use super::{ONLINE_MANUAL_URL, app_icon_data, resolve_user_guide_target_in_roots};
     use std::path::Path;
     use std::process::Command;
+
+    #[test]
+    fn user_guide_target_prefers_local_html_and_falls_back_to_online_url() {
+        let tmp = std::env::temp_dir().join(format!("epmi_guide_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = std::fs::create_dir_all(&tmp);
+        let roots = vec![tmp.clone()];
+        assert_eq!(
+            resolve_user_guide_target_in_roots(&roots),
+            ONLINE_MANUAL_URL
+        );
+
+        let local_html = tmp.join("site/manual/index.html");
+        if let Some(parent) = local_html.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&local_html, "<html></html>");
+        let resolved = resolve_user_guide_target_in_roots(&roots);
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(resolved.starts_with("file://"));
+        assert!(resolved.ends_with("/site/manual/index.html"));
+    }
 
     #[test]
     fn embedded_app_icon_and_desktop_metadata_are_valid() {

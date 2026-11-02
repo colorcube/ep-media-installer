@@ -512,4 +512,33 @@ pub static DE: &[(&str, &str)] = &[
     ("2.1 mm (Wide)", "2,1 mm (Weit)"),
     ("2.4 mm (Wider)", "2,4 mm (Sehr weit)"),
     ("Custom Gap", "Eigener Abstand"),
+    ("📖 User guide  (F1)", "📖 Benutzerhandbuch  (F1)"),
+    (
+        "📖 Open user guide  (F1)",
+        "📖 Benutzerhandbuch öffnen  (F1)",
+    ),
+    (
+        "Opened user guide: {target}",
+        "Benutzerhandbuch geöffnet: {target}",
+    ),
+    (
+        "Could not open browser (xdg-open): {target}",
+        "Browser konnte nicht geöffnet werden (xdg-open): {target}",
+    ),
+    ("Appearance", "Darstellung"),
+    ("UI theme", "Oberflächen-Theme"),
+    (
+        "KDE system (automatic from kdeglobals)",
+        "KDE-System (automatisch aus kdeglobals)",
+    ),
+    (
+        "Font & scaling (KDE: {font} {size} pt)",
+        "Schrift & Skalierung (KDE: {font} {size} pt)",
+    ),
+    ("90 % (compact)", "90 % (Kompakt)"),
+    ("100 % (KDE default)", "100 % (KDE-Standard)"),
+    ("110 % (larger)", "110 % (Größer)"),
+    ("125 % (large)", "125 % (Groß)"),
+    ("Language", "Sprache"),
+    ("System default", "Systemsprache"),
 ];

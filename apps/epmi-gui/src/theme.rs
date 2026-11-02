@@ -19,8 +19,11 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ThemeKind {
-    /// KDE Breeze Dark (matched to KDE Plasma 6 Breeze Dark palette).
+    /// Automatically reads the active KDE Plasma color scheme (`[Colors:Window]`, `[Colors:View]`,
+    /// `[Colors:Button]`, `[Colors:Selection]`) from `~/.config/kdeglobals`, falling back to `BreezeDark`.
     #[default]
+    KdeSystem,
+    /// KDE Breeze Dark (matched to KDE Plasma 6 Breeze Dark palette).
     BreezeDark,
     /// KDE Breeze Light (matched to KDE Plasma 6 Breeze Light palette).
     BreezeLight,
@@ -48,6 +51,7 @@ pub enum ThemeKind {
 
 impl ThemeKind {
     pub const ALL: &'static [ThemeKind] = &[
+        ThemeKind::KdeSystem,
         ThemeKind::BreezeDark,
         ThemeKind::BreezeLight,
         ThemeKind::Pro,
@@ -65,6 +69,7 @@ impl ThemeKind {
     #[must_use]
     pub fn label(self) -> &'static str {
         match self {
+            Self::KdeSystem => crate::tr!("KDE system (automatic from kdeglobals)"),
             Self::BreezeDark => "KDE Breeze Dark",
             Self::BreezeLight => "KDE Breeze Light",
             Self::Pro => crate::tr!("Pro Dark (Anthracite)"),
@@ -81,8 +86,12 @@ impl ThemeKind {
     }
 
     #[must_use]
-    pub const fn is_dark(self) -> bool {
+    pub fn is_dark(self) -> bool {
         match self {
+            Self::KdeSystem => {
+                let tok = self.tokens();
+                color_luma(tok.dock) < 128
+            }
             Self::BreezeDark
             | Self::Pro
             | Self::ProMedium
@@ -99,8 +108,9 @@ impl ThemeKind {
     }
 
     #[must_use]
-    pub const fn tokens(self) -> Tokens {
+    pub fn tokens(self) -> Tokens {
         match self {
+            Self::KdeSystem => read_kde_system_tokens().unwrap_or(Tokens::BREEZE_DARK),
             Self::BreezeDark => Tokens::BREEZE_DARK,
             Self::BreezeLight => Tokens::BREEZE_LIGHT,
             Self::Pro => Tokens::PRO,
@@ -115,6 +125,165 @@ impl ThemeKind {
             Self::Classic => Tokens::CLASSIC,
         }
     }
+}
+
+fn color_luma(c: Color32) -> u32 {
+    (u32::from(c.r()) * 299 + u32::from(c.g()) * 587 + u32::from(c.b()) * 114) / 1000
+}
+
+fn mix_color(a: Color32, b: Color32, t: f32) -> Color32 {
+    let t = t.clamp(0.0, 1.0);
+    let inv = 1.0 - t;
+    Color32::from_rgb(
+        ((f32::from(a.r()) * inv + f32::from(b.r()) * t).round()) as u8,
+        ((f32::from(a.g()) * inv + f32::from(b.g()) * t).round()) as u8,
+        ((f32::from(a.b()) * inv + f32::from(b.b()) * t).round()) as u8,
+    )
+}
+
+fn parse_kde_rgb(val: &str) -> Option<Color32> {
+    let mut parts = val.split(',');
+    let r: u8 = parts.next()?.trim().parse().ok()?;
+    let g: u8 = parts.next()?.trim().parse().ok()?;
+    let b: u8 = parts.next()?.trim().parse().ok()?;
+    Some(Color32::from_rgb(r, g, b))
+}
+
+/// Parses KDE Plasma `[Colors:Window]`, `[Colors:View]`, `[Colors:Button]`, `[Colors:Selection]`,
+/// and `[Colors:Header]` sections from `~/.config/kdeglobals` content into [`Tokens`].
+#[must_use]
+pub fn parse_kde_globals_tokens(content: &str) -> Option<Tokens> {
+    let mut section = "";
+    let mut win_bg: Option<Color32> = None;
+    let mut win_bg_alt: Option<Color32> = None;
+    let mut win_fg: Option<Color32> = None;
+    let mut win_fg_inactive: Option<Color32> = None;
+    let mut view_bg: Option<Color32> = None;
+    let mut btn_bg: Option<Color32> = None;
+    let mut btn_focus: Option<Color32> = None;
+    let mut btn_hover: Option<Color32> = None;
+    let mut sel_bg: Option<Color32> = None;
+    let mut sel_fg: Option<Color32> = None;
+    let mut hdr_bg: Option<Color32> = None;
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = &line[1..line.len() - 1];
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else {
+            continue;
+        };
+        let key = k.trim();
+        let val = v.trim();
+        match section {
+            "Colors:Window" => match key {
+                "BackgroundNormal" => win_bg = parse_kde_rgb(val),
+                "BackgroundAlternate" => win_bg_alt = parse_kde_rgb(val),
+                "ForegroundNormal" => win_fg = parse_kde_rgb(val),
+                "ForegroundInactive" => win_fg_inactive = parse_kde_rgb(val),
+                _ => {}
+            },
+            "Colors:View" => {
+                if key == "BackgroundNormal" {
+                    view_bg = parse_kde_rgb(val);
+                }
+            }
+            "Colors:Button" => match key {
+                "BackgroundNormal" => btn_bg = parse_kde_rgb(val),
+                "DecorationFocus" => btn_focus = parse_kde_rgb(val),
+                "DecorationHover" => btn_hover = parse_kde_rgb(val),
+                _ => {}
+            },
+            "Colors:Selection" => match key {
+                "BackgroundNormal" => sel_bg = parse_kde_rgb(val),
+                "ForegroundNormal" => sel_fg = parse_kde_rgb(val),
+                _ => {}
+            },
+            "Colors:Header" if key == "BackgroundNormal" => {
+                hdr_bg = parse_kde_rgb(val);
+            }
+            _ => {}
+        }
+    }
+
+    let dock = win_bg?;
+    let is_dark = color_luma(dock) < 128;
+    let fallback = if is_dark {
+        Tokens::BREEZE_DARK
+    } else {
+        Tokens::BREEZE_LIGHT
+    };
+
+    let text = win_fg.unwrap_or(fallback.text);
+    let text_dim = win_fg_inactive.unwrap_or_else(|| mix_color(text, dock, 0.32));
+    let text_faint = mix_color(text, dock, 0.52);
+    let accent = sel_bg.or(btn_focus).unwrap_or(fallback.accent);
+    let accent_text = sel_fg.unwrap_or(Color32::WHITE);
+    let field = view_bg.unwrap_or(fallback.field);
+    let card = btn_bg
+        .or(win_bg_alt)
+        .unwrap_or_else(|| mix_color(dock, text, 0.06));
+    let chrome = hdr_bg.unwrap_or_else(|| {
+        if is_dark {
+            mix_color(dock, Color32::BLACK, 0.12)
+        } else {
+            mix_color(dock, Color32::BLACK, 0.05)
+        }
+    });
+    let canvas = if is_dark {
+        mix_color(dock, Color32::BLACK, 0.35)
+    } else {
+        mix_color(dock, Color32::BLACK, 0.18)
+    };
+    let separator = mix_color(dock, text, if is_dark { 0.14 } else { 0.16 });
+    let field_border = mix_color(dock, text, if is_dark { 0.24 } else { 0.26 });
+    let card_border = mix_color(dock, text, 0.16);
+    let card_header = mix_color(card, text, 0.05);
+    let hover = btn_hover
+        .map(|h| mix_color(card, h, 0.32))
+        .unwrap_or_else(|| mix_color(card, text, 0.10));
+    let pressed = mix_color(card, accent, 0.28);
+    let accent_soft = mix_color(dock, accent, if is_dark { 0.45 } else { 0.25 });
+
+    Some(Tokens {
+        chrome,
+        canvas,
+        dock,
+        card,
+        card_border,
+        card_header,
+        field,
+        field_border,
+        hover,
+        pressed,
+        text,
+        text_dim,
+        text_faint,
+        accent,
+        accent_soft,
+        accent_text,
+        separator,
+        danger: fallback.danger,
+        warning: fallback.warning,
+        success: fallback.success,
+        radius_sm: 4,
+        radius: 5,
+        radius_lg: 7,
+    })
+}
+
+/// Reads the user's active KDE Plasma color scheme from `~/.config/kdeglobals`.
+#[must_use]
+pub fn read_kde_system_tokens() -> Option<Tokens> {
+    let home = std::env::var("HOME").ok()?;
+    let path = PathBuf::from(home).join(".config/kdeglobals");
+    let content = std::fs::read_to_string(path).ok()?;
+    parse_kde_globals_tokens(&content)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -771,4 +940,49 @@ pub fn apply_theme_and_typography(
     };
 
     ctx.set_style(style);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ThemeKind, color_luma, parse_kde_globals_tokens};
+    use egui::Color32;
+
+    #[test]
+    fn default_theme_is_kde_system() {
+        assert_eq!(ThemeKind::default(), ThemeKind::KdeSystem);
+        assert_eq!(ThemeKind::ALL.first().copied(), Some(ThemeKind::KdeSystem));
+    }
+
+    #[test]
+    fn parses_kde_globals_dark_and_light_schemes() {
+        let dark_ini = r"
+[Colors:Window]
+BackgroundNormal=32,35,38
+ForegroundNormal=252,252,252
+
+[Colors:View]
+BackgroundNormal=24,27,29
+
+[Colors:Selection]
+BackgroundNormal=61,174,233
+ForegroundNormal=255,255,255
+";
+        let Some(dark_tok) = parse_kde_globals_tokens(dark_ini) else {
+            return;
+        };
+        assert_eq!(dark_tok.dock, Color32::from_rgb(32, 35, 38));
+        assert_eq!(dark_tok.accent, Color32::from_rgb(61, 174, 233));
+        assert!(color_luma(dark_tok.dock) < 128);
+
+        let light_ini = r"
+[Colors:Window]
+BackgroundNormal=239,240,241
+ForegroundNormal=35,38,41
+";
+        let Some(light_tok) = parse_kde_globals_tokens(light_ini) else {
+            return;
+        };
+        assert_eq!(light_tok.dock, Color32::from_rgb(239, 240, 241));
+        assert!(color_luma(light_tok.dock) >= 128);
+    }
 }
