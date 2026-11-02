@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>de.colorcube.epmi</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>EP Media Installer (epmi)</name>
+  <summary>Manage custom media slots and .emx packages on Epson SureColor printers</summary>
+  <summary xml:lang="de">Eigene Papierspeicherplätze und .emx-Pakete auf Epson SureColor Druckern verwalten</summary>
+  <developer id="de.colorcube">
+    <name>René Fritz</name>
+  </developer>
+  <description>
+    <p>
+      EP Media Installer (epmi) manages custom paper types, printer NVRAM slots, and .emx media packages for
+      Epson SureColor fine-art and large-format printers under Linux.
+    </p>
+    <ul>
+      <li>Automatic discovery of Epson printers via CUPS and local network SNMP</li>
+      <li>Read, edit, and write the 30 custom media NVRAM slots (1..30) directly in the printer</li>
+      <li>Browse and install media packages from Epson's online catalog (all 27 SureColor SC-P and SC-T series)</li>
+      <li>One-click system installation of paper definitions and ICC profiles for the CUPS driver and LumaPrint</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">de.colorcube.epmi.desktop</launchable>
+  <url type="homepage">https://github.com/colorcube/ep-media-installer</url>
+  <url type="bugtracker">https://github.com/colorcube/ep-media-installer/issues</url>
+  <url type="vcs-browser">https://github.com/colorcube/ep-media-installer</url>
+  <categories>
+    <category>Settings</category>
+    <category>HardwareSettings</category>
+    <category>Printing</category>
+  </categories>
+  <keywords>
+    <keyword>Epson</keyword>
+    <keyword>SureColor</keyword>
+    <keyword>SC-P900</keyword>
+    <keyword>SC-P700</keyword>
+    <keyword>EMX</keyword>
+    <keyword>ICC</keyword>
+    <keyword>CUPS</keyword>
+  </keywords>
+  <provides>
+    <binary>epmi-gui</binary>
+    <binary>epmi</binary>
+  </provides>
+  <requires>
+    <display_length compare="ge">640</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-11-01" type="development">
+      <description>
+        <p>First public beta release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

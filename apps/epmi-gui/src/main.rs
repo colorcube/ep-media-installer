@@ -92,6 +92,28 @@ fn open_native_emx_file_dialog() -> Option<String> {
     )
 }
 
+/// Embedded 128×128 RGBA application icon (`share/icons/hicolor/128x128/apps/de.colorcube.epmi.png`).
+const APP_ICON_PNG: &[u8] =
+    include_bytes!("../../../share/icons/hicolor/128x128/apps/de.colorcube.epmi.png");
+
+/// Decode the embedded application icon into [`egui::IconData`] for the window viewport.
+fn app_icon_data() -> egui::IconData {
+    let decoder = png::Decoder::new(std::io::Cursor::new(APP_ICON_PNG));
+    if let Ok(mut reader) = decoder.read_info() {
+        let buf_len = reader.output_buffer_size().unwrap_or(128 * 128 * 4);
+        let mut buf = vec![0_u8; buf_len];
+        if let Ok(info) = reader.next_frame(&mut buf) {
+            buf.truncate(info.buffer_size());
+            return egui::IconData {
+                rgba: buf,
+                width: info.width,
+                height: info.height,
+            };
+        }
+    }
+    egui::IconData::default()
+}
+
 pub struct EpmiGuiApp {
     /// Selected PhotoCraft / KDE theme.
     theme_kind: ThemeKind,
@@ -154,6 +176,8 @@ pub struct EpmiGuiApp {
 
     /// Show/hide the "Über epmi" modal window.
     show_about_modal: bool,
+    /// Cached application icon texture for the About modal.
+    app_icon_texture: Option<egui::TextureHandle>,
 
     /// Status bar message & state.
     status_msg: String,
@@ -207,6 +231,7 @@ impl EpmiGuiApp {
             cloud_only_custom_emx: false,
             custom_media_json_path,
             show_about_modal: false,
+            app_icon_texture: None,
             status_msg: String::from(tr!(
                 "Searching for Epson printers in CUPS and on the network…"
             )),
@@ -2235,6 +2260,20 @@ impl EpmiGuiApp {
         if !self.show_about_modal {
             return;
         }
+        let icon_tex = self
+            .app_icon_texture
+            .get_or_insert_with(|| {
+                let icon = app_icon_data();
+                let w = usize::try_from(icon.width).unwrap_or(128);
+                let h = usize::try_from(icon.height).unwrap_or(128);
+                let img = if icon.rgba.len() == w.saturating_mul(h).saturating_mul(4) && w > 0 {
+                    egui::ColorImage::from_rgba_unmultiplied([w, h], &icon.rgba)
+                } else {
+                    egui::ColorImage::new([1, 1], egui::Color32::TRANSPARENT)
+                };
+                ctx.load_texture("epmi_app_icon", img, egui::TextureOptions::LINEAR)
+            })
+            .clone();
         let t = self.tokens;
         let mut open = self.show_about_modal;
         let mut close_clicked = false;
@@ -2247,16 +2286,24 @@ impl EpmiGuiApp {
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.add_space(4.0);
-                ui.heading(
-                    RichText::new(tr!("epmi — media management for Epson SureColor printers"))
-                        .strong()
-                        .color(t.accent),
-                );
-                ui.label(
-                    RichText::new(tr!("Version {version}", version = env!("CARGO_PKG_VERSION")))
-                        .small()
-                        .color(t.text_dim),
-                );
+                ui.horizontal(|ui| {
+                    ui.image((icon_tex.id(), Vec2::splat(48.0)));
+                    ui.vertical(|ui| {
+                        ui.heading(
+                            RichText::new(tr!("epmi — media management for Epson SureColor printers"))
+                                .strong()
+                                .color(t.accent),
+                        );
+                        ui.label(
+                            RichText::new(tr!(
+                                "Version {version}",
+                                version = env!("CARGO_PKG_VERSION")
+                            ))
+                            .small()
+                            .color(t.text_dim),
+                        );
+                    });
+                });
 
                 ui.add_space(8.0);
                 ui.separator();
@@ -2344,7 +2391,8 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(tr!("epmi — Media Installer for Epson SureColor"))
-            .with_app_id("epmi-gui")
+            .with_app_id("de.colorcube.epmi")
+            .with_icon(app_icon_data())
             .with_inner_size([1380.0, 860.0])
             .with_min_inner_size([1024.0, 640.0]),
         ..Default::default()
@@ -2355,4 +2403,50 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| Ok(Box::new(EpmiGuiApp::new(cc, host)))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::app_icon_data;
+    use std::path::Path;
+    use std::process::Command;
+
+    #[test]
+    fn embedded_app_icon_and_desktop_metadata_are_valid() {
+        let icon = app_icon_data();
+        assert_eq!(icon.width, 128);
+        assert_eq!(icon.height, 128);
+        assert_eq!(icon.rgba.len(), 128 * 128 * 4);
+
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let desktop_file = root.join("share/applications/de.colorcube.epmi.desktop");
+        let metainfo_file = root.join("share/metainfo/de.colorcube.epmi.metainfo.xml");
+        let svg_icon = root.join("share/icons/hicolor/scalable/apps/de.colorcube.epmi.svg");
+        assert!(desktop_file.is_file());
+        assert!(metainfo_file.is_file());
+        assert!(svg_icon.is_file());
+        if let Ok(out) = Command::new("desktop-file-validate")
+            .arg(&desktop_file)
+            .output()
+        {
+            assert!(
+                out.status.success(),
+                "desktop-file-validate failed: {}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        if let Ok(out) = Command::new("appstreamcli")
+            .args(["validate", "--no-net"])
+            .arg(&metainfo_file)
+            .output()
+        {
+            assert!(
+                out.status.success(),
+                "appstreamcli validate failed: {}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+    }
 }

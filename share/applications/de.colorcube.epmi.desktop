@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=EP Media Installer (epmi)
+Name[de]=EP Media Installer (epmi)
+GenericName=Printer Media Manager
+GenericName[de]=Druckermedien-Verwaltung
+Comment=Manage custom media slots, .emx packages and ICC profiles for Epson SureColor printers
+Comment[de]=Eigene Papierspeicherplätze, .emx-Pakete und ICC-Profile für Epson SureColor Drucker verwalten
+Exec=epmi-gui
+TryExec=epmi-gui
+Icon=de.colorcube.epmi
+Terminal=false
+Categories=Settings;HardwareSettings;Printing;
+Keywords=Epson;SureColor;SC-P900;SC-P700;media;EMX;ICC;paper;printer;CUPS;
+Keywords[de]=Epson;SureColor;SC-P900;SC-P700;Papier;Medien;EMX;ICC;Drucker;CUPS;
+StartupNotify=true
+StartupWMClass=de.colorcube.epmi

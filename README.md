@@ -1,8 +1,10 @@
-# `ep-media-installer` (`epmi`)
+<p align="center"><img src="share/icons/hicolor/scalable/apps/de.colorcube.epmi.svg" width="112" alt="epmi icon"></p>
+
+# `EP Media Installer` (`epmi`)
 
 Native Rust Custom Media & `.emx` Management Tool for **Epson SureColor** Fine Art & Large Format Printers (SC-P900, SC-P700, SC-P5300, SC-P7500, SC-P9500, SC-T Series, and more).
 
-> **Disclaimer:** `ep-media-installer` (`epmi`) is an independent, clean-room open-source utility and is not affiliated with, endorsed by, or sponsored by Seiko Epson Corporation. Product names are used solely for compatibility reference.
+> **Disclaimer:** `EP Media Installer` (`epmi`) is an independent, clean-room open-source utility and is not affiliated with, endorsed by, or sponsored by Seiko Epson Corporation. Product names are used solely for compatibility reference.
 
 > [!WARNING]
 > **Beta.** Tested on Fedora with an Epson SureColor **SC-P900**: discovering the printer, reading the
@@ -108,8 +110,14 @@ cargo run -p epmi -- cloud-download 230009156 --import --slot 6 --write-printer
 
 ## Desktop GUI (`epmi-gui`)
 
+Run directly from a checkout or install `epmi` and `epmi-gui` into `~/.local/bin` with the desktop entry, AppStream metadata, and icons (`~/.local/share`):
+
 ```bash
 cargo run -p epmi-gui
+
+# Or install for the current user (appears as "EP Media Installer (epmi)" in the application menu):
+./bin/install-desktop              # builds --release and installs into ~/.local/{bin,share}
+./bin/install-desktop --uninstall  # removes the installed files
 ```
 
 - **Automatic Epson Printer Discovery:** Finds Epson printers automatically via installed CUPS queues (`lpstat -v` / PPD) and local network SNMPv1 discovery (`hrDeviceDescr` / IEEE-1284 Device ID), strictly filtering out non-Epson devices. Automatically selects the matching model in the Cloud Catalog and reads all 30 memory slots on startup.
@@ -130,7 +138,7 @@ cached in `~/.cache/epmi/emx/`. There is no telemetry.
 
 ## About the development
 
-ep-media-installer was developed with extensive help from AI. The code, the tests and the documentation were written by Google's Gemini and Anthropic's Claude under my direction. Requirements, design decisions, review and all tests with real hardware are my own.
+EP Media Installer was developed with extensive help from AI. The code, the tests and the documentation were written by Google's Gemini and Anthropic's Claude under my direction. Requirements, design decisions, review and all tests with real hardware are my own.
 
 ## License
 
