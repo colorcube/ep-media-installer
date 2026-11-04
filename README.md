@@ -16,9 +16,9 @@ Native Rust Custom Media & `.emx` Management Tool for **Epson SureColor** Fine A
 
 ![EP Media Installer – NVRAM Slots & Inspector](docs/manual/en/images/ui_slots_overview.png)
 
-## Documentation & User Manual
+## Documentation
 
-- **[Online User Manual (English)](https://colorcube.github.io/ep-media-installer/manual/)** — [1. Quickstart & 1-Click Workflow](https://colorcube.github.io/ep-media-installer/manual/1-quickstart-and-workflow.html) · [2. NVRAM Slots, Cloud Catalog & `.emx` Packages](https://colorcube.github.io/ep-media-installer/manual/2-printer-slots-and-cloud.html)
+Online manual: **[English](https://colorcube.github.io/ep-media-installer/manual/)**
 
 ---
 
