@@ -54,20 +54,43 @@ fn ber_read_tlv(buf: &[u8], pos: usize) -> Result<(u8, &[u8], usize)> {
         usize::from(b0)
     } else {
         let nbytes = usize::from(b0 & 0x7F);
-        if nbytes == 0 || nbytes > 4 {
+        let strict_len = if (1..=4).contains(&nbytes) && cur.saturating_add(nbytes) <= buf.len() {
+            let mut len_acc = 0usize;
+            for i in 0..nbytes {
+                len_acc = (len_acc << 8) | usize::from(buf[cur + i]);
+            }
+            let after_len = cur.saturating_add(nbytes);
+            if after_len
+                .checked_add(len_acc)
+                .is_some_and(|end| end <= buf.len())
+            {
+                cur = after_len;
+                Some(len_acc)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(valid_len) = strict_len {
+            valid_len
+        } else if cur
+            .checked_add(usize::from(b0))
+            .is_some_and(|end| end <= buf.len())
+        {
+            // Epson printer SNMP firmware quirk: when a GetRequest < 128 bytes grows to 128..=255 bytes
+            // in GetResponse, the embedded SNMP agent may write a single-byte length (0x80..=0xFF) in place
+            // without inserting the 0x81 long-form BER prefix.
+            usize::from(b0)
+        } else if tag == 0x30 || tag == 0xA2 {
+            // Outer SEQUENCE or GetResponse-PDU header with inaccurate total length: consume remaining slice.
+            buf.len().saturating_sub(cur)
+        } else {
             return Err(EpmiError::SnmpProtocol(format!(
                 "Invalid BER length byte 0x{b0:02x}"
             )));
         }
-        let mut len_acc = 0usize;
-        for _ in 0..nbytes {
-            let b = *buf.get(cur).ok_or_else(|| {
-                EpmiError::SnmpProtocol("Truncated multi-byte BER length".to_string())
-            })?;
-            len_acc = (len_acc << 8) | usize::from(b);
-            cur = cur.saturating_add(1);
-        }
-        len_acc
     };
     let end = cur
         .checked_add(length)
@@ -124,7 +147,7 @@ pub fn build_snmp_get_raw_oid(cmd_bytes: &[u8], community: &str, req_id: u8) -> 
     ber_tlv(0x30, &msg_inner)
 }
 
-pub fn parse_snmp_response(resp: &[u8]) -> Result<Vec<u8>> {
+fn parse_snmp_response_ber(resp: &[u8]) -> Result<Vec<u8>> {
     let (_msg_tag, msg_val, _) = ber_read_tlv(resp, 0)?;
     let (_ver_tag, _ver, pos) = ber_read_tlv(msg_val, 0)?;
     let (_comm_tag, _comm, pos) = ber_read_tlv(msg_val, pos)?;
@@ -145,6 +168,30 @@ pub fn parse_snmp_response(resp: &[u8]) -> Result<Vec<u8>> {
     let (_oid_tag, _oid_b, vpos) = ber_read_tlv(vb_val, 0)?;
     let (_val_tag, val_b, _) = ber_read_tlv(vb_val, vpos)?;
     Ok(val_b.to_vec())
+}
+
+pub fn parse_snmp_response(resp: &[u8]) -> Result<Vec<u8>> {
+    match parse_snmp_response_ber(resp) {
+        Ok(val) => Ok(val),
+        Err(err) => {
+            // If the printer returned an explicit SNMP error-status, propagate it.
+            if matches!(&err, EpmiError::SnmpProtocol(msg) if msg.starts_with("SNMP GetResponse error-status="))
+            {
+                return Err(err);
+            }
+            // Match Epson EP_PrinterSDK.dll (CEbapiCommand): scan raw UDP GetResponse directly for "@BDC PS\r\n"
+            // if outer ASN.1 BER container headers are non-standard.
+            if let Some(pos) = resp.windows(9).position(|w| w == b"@BDC PS\r\n") {
+                let start = if pos > 0 && resp[pos - 1] == 0x00 {
+                    pos - 1
+                } else {
+                    pos
+                };
+                return Ok(resp[start..].to_vec());
+            }
+            Err(err)
+        }
+    }
 }
 
 pub fn extract_ex_payload(reply: &[u8]) -> Result<(u8, u8, u8, Vec<u8>)> {
@@ -304,11 +351,27 @@ impl SnmpMediaClient {
         sock.set_read_timeout(Some(self.timeout))?;
         sock.set_write_timeout(Some(self.timeout))?;
         let target = format!("{}:{}", self.host, self.port);
-        sock.send_to(&pkt, &target)?;
 
         let mut buf = vec![0u8; 65535];
-        let (n, _) = sock.recv_from(&mut buf)?;
-        parse_snmp_response(&buf[..n])
+        let mut last_err = None;
+        for attempt in 0..3 {
+            if attempt > 0 {
+                std::thread::sleep(Duration::from_millis(80));
+            }
+            if let Err(e) = sock.send_to(&pkt, &target) {
+                last_err = Some(EpmiError::from(e));
+                continue;
+            }
+            match sock.recv_from(&mut buf) {
+                Ok((n, _)) => return parse_snmp_response(&buf[..n]),
+                Err(e) => {
+                    last_err = Some(EpmiError::from(e));
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| {
+            EpmiError::SnmpProtocol("No SNMP response from printer".to_string())
+        }))
     }
 
     /// Read the compact 30-slot directory in a single SNMP query.
@@ -389,11 +452,15 @@ impl SnmpMediaClient {
             return Err(EpmiError::PrinterExError(res1));
         }
 
+        std::thread::sleep(Duration::from_millis(40));
+
         let rep2 = self.send_ex_command(&cmd2, slot_data.slot.saturating_add(30))?;
         let (res2, _, _, _) = extract_ex_payload(&rep2)?;
         if res2 != 0 {
             return Err(EpmiError::PrinterExError(res2));
         }
+
+        std::thread::sleep(Duration::from_millis(40));
 
         self.read_slot(slot_data.slot)
     }
@@ -484,6 +551,63 @@ mod tests {
                     0x02, 0x00, 0x00
                 ]
             );
+        }
+    }
+
+    #[test]
+    fn test_parse_snmp_response_hahnemuehle_128_boundary_quirk() {
+        let mut s = PrinterMediaSlot::empty(1);
+        s.registered = true;
+        s.media_name = "Hahnemuehle_FineArt_Baryta_325".to_string();
+        s.user_media_id = 230_130_025;
+        s.base_sn_id = 174;
+        s.media_category = 4;
+        s.platen_gap = 15;
+        s.thickness_01mm = 41;
+
+        let enc = encode_slot_write_packets(&s);
+        assert!(enc.is_ok());
+        let Ok((cmd1, _, _)) = enc else {
+            return;
+        };
+        let get_req = build_snmp_get_raw_oid(&cmd1, "public", 1);
+        assert_eq!(get_req.len(), 129);
+
+        // Simulate printer SNMP GetResponse where outer BER lengths cross 128 bytes (0x92 and 0x85)
+        // written as single-byte lengths without 0x81 prefix, carrying "@BDC PS\r\nex:\x00\x00\x00\x00\x00".
+        let bdc_reply = b"\x00@BDC PS\r\nex:\x00\x00\x00\x00\x00\r\n";
+        let subids = encode_oid_subids(&cmd1);
+        let mut oid_bytes = BASE_OID_BER.to_vec();
+        oid_bytes.extend_from_slice(&subids);
+        let oid_tlv = ber_tlv(0x06, &oid_bytes);
+        let val_tlv = ber_tlv(0x04, bdc_reply);
+        let mut vb_inner = oid_tlv;
+        vb_inner.extend_from_slice(&val_tlv);
+
+        // Construct malformed 1-byte BER lengths >= 0x80 (no 0x81 prefix)
+        let mut vb = vec![0x30, vb_inner.len() as u8];
+        vb.extend_from_slice(&vb_inner);
+        let mut vbl = vec![0x30, vb.len() as u8];
+        vbl.extend_from_slice(&vb);
+        let mut pdu_inner = vec![0x02, 0x01, 0x01, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00];
+        pdu_inner.extend_from_slice(&vbl);
+        let mut pdu = vec![0xA2, pdu_inner.len() as u8];
+        pdu.extend_from_slice(&pdu_inner);
+        let mut msg_inner = vec![0x02, 0x01, 0x00, 0x04, 0x06];
+        msg_inner.extend_from_slice(b"public");
+        msg_inner.extend_from_slice(&pdu);
+        let mut resp = vec![0x30, msg_inner.len() as u8];
+        resp.extend_from_slice(&msg_inner);
+
+        let parsed_res = parse_snmp_response(&resp);
+        assert!(parsed_res.is_ok());
+        if let Ok(parsed) = parsed_res {
+            let ex_res = extract_ex_payload(&parsed);
+            assert!(ex_res.is_ok());
+            if let Ok((res_code, _, _, payload)) = ex_res {
+                assert_eq!(res_code, 0);
+                assert!(payload.is_empty());
+            }
         }
     }
 }

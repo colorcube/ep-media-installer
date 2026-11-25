@@ -605,7 +605,7 @@ checksum = "fc7e7a64c02cf7a5b51e745a9e45f60660a286f151c238b9d397b3e923f5082f"
 
 [[package]]
 name = "epmi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "epmi-core",
  "serde_json",
@@ -613,7 +613,7 @@ dependencies = [
 
 [[package]]
 name = "epmi-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "flate2",
  "log",
@@ -625,7 +625,7 @@ dependencies = [
 
 [[package]]
 name = "epmi-gui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "eframe",
  "egui",
